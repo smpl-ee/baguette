@@ -1,0 +1,46 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: false
+
+      - name: Install Kamal
+        run: gem install kamal
+
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Add deploy server to known hosts
+        run: ssh-keyscan ${{ vars.DEPLOY_SERVER }} >> ~/.ssh/known_hosts
+
+      - name: Renew SSL certificate
+        run: ssh ${{ vars.DEPLOY_USER || 'ubuntu' }}@${{ vars.DEPLOY_SERVER }} '/home/${{ vars.DEPLOY_USER || 'ubuntu' }}/acme.sh/renew.sh'
+
+      - name: Deploy with Kamal
+        env:
+          GITHUB_CLIENT_ID: ${{ secrets.AUTH_GITHUB_CLIENT_ID }}
+          GITHUB_CLIENT_SECRET: ${{ secrets.AUTH_GITHUB_CLIENT_SECRET }}
+          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+          DEPLOY_SERVER: ${{ vars.DEPLOY_SERVER }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER || 'ubuntu' }}
+          DOMAIN: ${{ vars.DOMAIN }}
+        run: kamal deploy

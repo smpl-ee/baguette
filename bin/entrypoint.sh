@@ -1,0 +1,64 @@
+#!/bin/sh
+set -e
+
+# On Fly.io machines (full VMs) there is no host Docker socket to mount, so we start dockerd
+# directly. On a VPS deploy (Kamal) the socket is mounted from the host — skip this.
+#
+# --data-root=/data/docker: Fly.io's rootfs is itself an overlayfs mount, which prevents
+# Docker's default overlay2 storage driver from working (can't stack overlay on overlay).
+# The /data volume is a plain ext4 filesystem that supports overlay2.
+if [ ! -S /var/run/docker.sock ] && command -v dockerd > /dev/null 2>&1; then
+    mkdir -p /data/docker
+    dockerd --host=unix:///var/run/docker.sock --data-root=/data/docker > /var/log/dockerd.log 2>&1 &
+    timeout 30 sh -c 'until [ -S /var/run/docker.sock ]; do sleep 0.5; done' || true
+fi
+
+# Match the docker group GID to the host socket so the baguette user can run docker commands.
+# The host mounts /var/run/docker.sock; its GID reflects the host's docker group.
+if [ -S /var/run/docker.sock ]; then
+    DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
+    groupmod -g "$DOCKER_GID" docker
+    usermod -aG docker baguette
+
+    # Ensure a compose file exists so docker-compose can create the default network.
+    if [ ! -f /data/docker-compose.yml ]; then
+        mkdir -p /data
+        printf 'services:\n\nnetworks:\n  default:\n' > /data/docker-compose.yml
+    fi
+
+    # Let docker-compose create the baguette_default network with proper compose labels.
+    # Because COMPOSE_PROJECT_NAME is set to "baguette".
+    docker compose -f /data/docker-compose.yml up --no-start 2>/dev/null || true
+
+    # Connect this container to baguette_default so it can reach compose services.
+    # Use container ID from mountinfo.
+    CONTAINER_ID=$(grep -o '/docker/containers/[a-f0-9]*/' /proc/self/mountinfo 2>/dev/null | head -1 | cut -d'/' -f4)
+    if [ -n "$CONTAINER_ID" ]; then
+      docker network connect baguette_default "$CONTAINER_ID" 2>/dev/null || true
+    fi
+fi
+
+# Persist the whole home folder on the mounted volume
+# - Claude authentication
+# - Baguette data directory
+# - Mise binaries and shims
+# - User-installed CLIs (pip/uv/poetry use ~/.cache and ~/.local, Cargo ~/.cargo, 
+#   Rustup ~/.rustup, npm ~/.npm, Ruby Bundler ~/.bundle, Go ~/go, ...
+mv /home/baguette /home/baguette-original
+ln -sfn /data /home/baguette
+cp -r /home/baguette-original/. /home/baguette/
+
+# Default mise layout is ~/.local/share/mise (on /data via the .local symlink)
+mkdir -p \
+    /home/baguette/.local/bin \
+    /home/baguette/.local/share/mise/shims \
+    /home/baguette/.cargo/bin \
+    /home/baguette/go/bin
+
+# User-installed CLIs (dirs above are on /data); prepend so they win over image PATH
+export PATH="/home/baguette/.local/share/mise/shims:/home/baguette/.local/bin:/home/baguette/.cargo/bin:/home/baguette/go/bin:$PATH"
+
+# Fix ownership of the whole data directory
+chown -R baguette:baguette /data
+
+exec gosu baguette "$@"

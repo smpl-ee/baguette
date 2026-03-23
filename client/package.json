@@ -1,0 +1,37 @@
+{
+  "name": "baguette-client",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "gen-icons": "node scripts/gen-icons.mjs"
+  },
+  "dependencies": {
+    "@feathersjs/feathers": "^5.0.41",
+    "@feathersjs/rest-client": "^5.0.41",
+    "@feathersjs/socketio-client": "^5.0.41",
+    "ansi-to-html": "^0.7.2",
+    "diff": "^8.0.3",
+    "lucide-react": "^0.575.0",
+    "react": "latest",
+    "react-dom": "latest",
+    "react-hot-toast": "^2.6.0",
+    "react-markdown": "^10.1.0",
+    "react-router-dom": "latest",
+    "remark-gfm": "^4.0.1",
+    "socket.io-client": "^4.8.3"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "@tailwindcss/vite": "latest",
+    "@vitejs/plugin-react": "^5",
+    "postcss": "^8.5.8",
+    "postcss-100vh-fix": "^2.0.0",
+    "tailwindcss": "latest",
+    "vite": "latest",
+    "vite-plugin-pwa": "^1.2.0"
+  }
+}

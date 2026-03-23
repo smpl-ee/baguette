@@ -1,0 +1,24 @@
+config:
+  session:
+    env:
+      # Hardcoded for local preview sessions only — not used in production
+      ENCRYPTION_KEY: 'baguette-local-preview-encryption-key-not-for-prod'
+      DEV_USER_GH_KEY: '${{ baguette.secrets.DEV_USER_GH_KEY }}'
+      # Relative path resolves to the session's worktree, providing per-session isolation
+      DATA_DIR: './.data'
+      PUBLIC_HOST: '${{ baguette.session.public_uri }}'
+      SOCKET_PATH: '/_baguette/ws/${{ baguette.session.short_id }}'
+    init: |
+      pnpm install:all
+      pnpm run migrate
+    commands:
+      - label: Run tests
+        run: pnpm test
+      - label: Reset database
+        run: rm -f ./.data/baguette.sqlite3 && pnpm run migrate
+  webserver:
+    # Starts Express (on $PORT) + Vite dev server (on $VITE_PORT) concurrently.
+    # Vite proxies /api, /auth, /socket.io to Express.
+    command: pnpm run dev
+    ports: [PORT, VITE_PORT]
+    expose: VITE_PORT

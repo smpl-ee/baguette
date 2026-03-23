@@ -1,0 +1,607 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+// ─── Module mocks (hoisted before imports) ────────────────────────────────────
+
+vi.mock('@anthropic-ai/sdk', () => {
+  const mockCreate = vi.fn().mockResolvedValue({
+    content: [{ type: 'text', text: 'Generated label' }],
+  });
+  class MockAnthropic {
+    constructor() {
+      this.messages = { create: mockCreate };
+    }
+  }
+  return { default: MockAnthropic };
+});
+
+vi.mock('../../db.js', () => ({ default: vi.fn() }));
+
+vi.mock('../github.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    createWorktree: vi.fn(),
+    removeWorktree: vi.fn(),
+    getOpenPR: vi.fn(),
+    remoteHasNewCommits: vi.fn(),
+  };
+});
+
+vi.mock('../agent-settings.js', () => ({
+  getAnthropicApiKeyFromUser: vi.fn(),
+  getAgentModelFromUser: vi.fn(),
+  getAllowedCommandsFromUser: vi.fn().mockReturnValue([]),
+  getEffectiveGithubToken: vi.fn((user) => user?.access_token || null),
+}));
+
+vi.mock('../baguette-config.js', () => ({
+  loadBaguetteConfig: vi.fn(),
+  interpolateEnv: vi.fn(),
+  getScriptCommand: vi.fn(),
+}));
+
+vi.mock('../baguette-mcp-server.js', () => ({
+  buildBaguetteMcpServer: vi.fn(() => ({})),
+}));
+
+vi.mock('child_process', () => ({
+  execFile: vi.fn((_cmd, _args, _opts, cb) => cb(null, { stdout: '', stderr: '' })),
+}));
+
+// ─── Imports ──────────────────────────────────────────────────────────────────
+
+import path from 'path';
+import { createTestDb } from '../../test-utils/db.js';
+import { query } from '@anthropic-ai/claude-agent-sdk';
+import { getAnthropicApiKeyFromUser, getAgentModelFromUser } from '../agent-settings.js';
+import { loadBaguetteConfig } from '../baguette-config.js';
+
+import { REPOS_DIR } from '../../config.js';
+import { ClaudeAgentService } from '../feathers/claude-agent.service.js';
+
+// ─── Test helpers ─────────────────────────────────────────────────────────────
+
+/**
+ * Create a mock async iterable that the SDK query returns.
+ * The service's processMessages loop iterates this.
+ */
+function makeAsyncIterable(messages) {
+  return {
+    [Symbol.asyncIterator]() {
+      let i = 0;
+      return {
+        async next() {
+          if (i < messages.length) return { value: messages[i++], done: false };
+          return { value: undefined, done: true };
+        },
+      };
+    },
+    setPermissionMode: vi.fn(),
+    setModel: vi.fn(),
+    close: vi.fn(),
+  };
+}
+
+/** Iterator that never yields — keeps `processMessages` running so the session stays in `_activeSessions`. */
+function makeNeverEndingIterable() {
+  return {
+    [Symbol.asyncIterator]() {
+      return {
+        next() {
+          return new Promise(() => {});
+        },
+      };
+    },
+    setPermissionMode: vi.fn(),
+    setModel: vi.fn(),
+    close: vi.fn(),
+  };
+}
+
+/**
+ * Create a mock Feathers app with tracked service calls.
+ */
+function makeMockApp(db) {
+  const sessionPatch = vi.fn().mockResolvedValue({});
+  const sessionRemove = vi.fn().mockResolvedValue({});
+  const sessionEmit = vi.fn();
+  const messageCreate = vi.fn().mockResolvedValue({ id: 1 });
+  const genericRemove = vi.fn().mockResolvedValue({});
+
+  const getClaudeEnv = vi.fn().mockResolvedValue({});
+  const deleteSessionTasks = vi.fn();
+  const createTask = vi.fn().mockResolvedValue({});
+
+  return {
+    get: function (key) {
+      if (key === 'db') return db;
+    },
+    service: vi.fn((name) => {
+      if (name === 'sessions')
+        return { patch: sessionPatch, remove: sessionRemove, emit: sessionEmit, getClaudeEnv };
+      if (name === 'messages') return { create: messageCreate, remove: genericRemove };
+      if (name === 'tasks') return { create: createTask, deleteSessionTasks };
+      return { patch: vi.fn(), create: vi.fn(), remove: genericRemove };
+    }),
+    // Exposed for assertions
+    _sessionPatch: sessionPatch,
+    _sessionRemove: sessionRemove,
+    _sessionEmit: sessionEmit,
+    _messageCreate: messageCreate,
+  };
+}
+
+const BASE_SESSION_DATA = {
+  user_id: 1,
+  short_id: 'abc12',
+  repo_full_name: 'owner/repo',
+  base_branch: 'main',
+  initial_prompt: 'Fix the bug',
+  permission_mode: 'default',
+  plan_mode: false,
+  model: null,
+  // Must follow REPOS_DIR/<stripped>/sessions/<id> so createCanUseTool can derive the repo dir
+  worktree_path: path.join(REPOS_DIR, 'owner-repo', 'sessions', 'test-session'),
+  repo_id: 7,
+  remote_branch: null,
+  claude_session_id: null,
+  status: 'active',
+};
+let BASE_SESSION_ID; // auto-generated integer id, set in beforeEach
+
+const BASE_USER = { id: 1, github_id: 1, username: 'test', access_token: 'gh-token' };
+
+const BASE_REPO = {
+  id: 7,
+  full_name: 'owner/repo',
+  bare_path: '/data/repos/owner-repo',
+  stripped_name: 'owner-repo',
+};
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+describe('ClaudeAgentService', (hooks) => {
+  const db = createTestDb(hooks);
+  let mockApp;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+
+    mockApp = makeMockApp(db);
+
+    await db('users').insert(BASE_USER);
+    await db('repos').insert(BASE_REPO);
+    [BASE_SESSION_ID] = await db('sessions').insert(BASE_SESSION_DATA);
+
+    // Default mocks
+    getAnthropicApiKeyFromUser.mockReturnValue('test-api-key');
+    getAgentModelFromUser.mockReturnValue('claude-sonnet-4-5');
+    loadBaguetteConfig.mockResolvedValue(null);
+
+    // Use mockImplementation so each query() call gets a fresh iterable
+    query.mockImplementation(() => makeAsyncIterable([]));
+  });
+
+  // ── 1. Session creation ────────────────────────────────────────────────────
+
+  describe('createAgentSession', () => {
+    it('starts the query loop with cwd pointing at the worktree, sets status to running', async () => {
+      const service = Object.assign(new ClaudeAgentService(), {
+        app: mockApp,
+        _db: mockApp.get('db'),
+      });
+
+      const sessionRow = await db('sessions').where({ id: BASE_SESSION_ID }).first();
+      const sessionState = await service.createAgentSession(sessionRow);
+
+      // query() started with cwd pointing at the worktree
+      expect(query).toHaveBeenCalledWith(
+        expect.objectContaining({
+          options: expect.objectContaining({
+            cwd: path.join(REPOS_DIR, 'owner-repo', 'sessions', 'test-session'),
+          }),
+        })
+      );
+
+      // Status patched to 'running'
+      expect(mockApp._sessionPatch).toHaveBeenCalledWith(
+        BASE_SESSION_ID,
+        { status: 'running' },
+        expect.anything()
+      );
+
+      // Session state returned
+      expect(sessionState.sessionId).toBe(BASE_SESSION_ID);
+      expect(sessionState.absoluteWorktreePath).toBe(
+        path.join(REPOS_DIR, 'owner-repo', 'sessions', 'test-session')
+      );
+
+      // Empty stream ends immediately; in-memory session must be disposed (no leak)
+      await vi.waitFor(() => {
+        expect(service.getActiveSession(BASE_SESSION_ID)).toBeUndefined();
+      });
+    });
+
+    it('passes canUseTool to query options so the SDK can request permissions', async () => {
+      const service = Object.assign(new ClaudeAgentService(), {
+        app: mockApp,
+        _db: mockApp.get('db'),
+      });
+      let capturedOptions;
+      query.mockImplementation(({ options }) => {
+        capturedOptions = options;
+        return makeAsyncIterable([]);
+      });
+
+      const sessionRow = await db('sessions').where({ id: BASE_SESSION_ID }).first();
+      await service.createAgentSession(sessionRow);
+
+      expect(typeof capturedOptions.canUseTool).toBe('function');
+    });
+  });
+
+  // ── 2. Assistant response ──────────────────────────────────────────────────
+
+  describe('assistant response', () => {
+    it('persists assistant messages via the messages service', async () => {
+      const service = Object.assign(new ClaudeAgentService(), {
+        app: mockApp,
+        _db: mockApp.get('db'),
+      });
+
+      const assistantMsg = {
+        type: 'assistant',
+        uuid: 'msg-uuid-1',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'Hello!' }] },
+      };
+
+      query.mockImplementation(() =>
+        makeAsyncIterable([
+          { type: 'system', subtype: 'init', session_id: 'claude-abc' },
+          assistantMsg,
+          { type: 'result', subtype: 'success', is_error: false },
+        ])
+      );
+
+      const sessionRow = await db('sessions').where({ id: BASE_SESSION_ID }).first();
+      await service.createAgentSession(sessionRow);
+
+      // Wait for the background processMessages loop to finish
+      await vi.waitFor(() => {
+        expect(mockApp._messageCreate).toHaveBeenCalledWith(
+          expect.objectContaining({
+            session_id: BASE_SESSION_ID,
+            type: 'assistant',
+            uuid: 'msg-uuid-1',
+          }),
+          expect.anything()
+        );
+      });
+    });
+
+    it('stores the claude_session_id from the init message', async () => {
+      const service = Object.assign(new ClaudeAgentService(), {
+        app: mockApp,
+        _db: mockApp.get('db'),
+      });
+
+      query.mockImplementation(() =>
+        makeAsyncIterable([
+          { type: 'system', subtype: 'init', session_id: 'claude-xyz' },
+          { type: 'result', subtype: 'success', is_error: false },
+        ])
+      );
+
+      const sessionRow = await db('sessions').where({ id: BASE_SESSION_ID }).first();
+      const sessionState = await service.createAgentSession(sessionRow);
+
+      await vi.waitFor(() => {
+        expect(sessionState.claudeSessionId).toBe('claude-xyz');
+      });
+    });
+  });
+
+  // ── 3. Assistant approval ──────────────────────────────────────────────────
+
+  describe('assistant approval', () => {
+    it('patches status to approval and emits permission request when canUseTool is called', async () => {
+      const service = Object.assign(new ClaudeAgentService(), {
+        app: mockApp,
+        _db: mockApp.get('db'),
+      });
+      let capturedCanUseTool;
+
+      query.mockImplementation(({ options }) => {
+        capturedCanUseTool = options.canUseTool;
+        // Keep the agent loop alive so `resolvePermission` still sees an active session
+        return makeNeverEndingIterable();
+      });
+
+      // Capture the requestId from the permission event
+      let capturedRequestId;
+      mockApp._sessionEmit.mockImplementation((event, data) => {
+        if (event === 'permission:request') capturedRequestId = data.requestId;
+      });
+
+      const sessionRow = await db('sessions').where({ id: BASE_SESSION_ID }).first();
+      await service.createAgentSession(sessionRow);
+
+      expect(capturedCanUseTool).toBeDefined();
+
+      // Simulate the SDK calling canUseTool
+      const abortController = new AbortController();
+      const permissionPromise = capturedCanUseTool(
+        'Bash',
+        { command: 'ls' },
+        { signal: abortController.signal }
+      );
+
+      // Status should be patched to 'approval'
+      await vi.waitFor(() => {
+        expect(mockApp._sessionPatch).toHaveBeenCalledWith(
+          BASE_SESSION_ID,
+          { status: 'approval' },
+          expect.anything()
+        );
+      });
+
+      // Permission event should have been emitted
+      expect(mockApp._sessionEmit).toHaveBeenCalledWith(
+        'permission:request',
+        expect.objectContaining({
+          sessionId: BASE_SESSION_ID,
+          user_id: BASE_SESSION_DATA.user_id,
+          toolName: 'Bash',
+        })
+      );
+
+      // Resolve the permission request
+      await service.resolvePermission(BASE_SESSION_ID, capturedRequestId, { approved: true });
+
+      // Status should be patched back to 'running'
+      await vi.waitFor(() => {
+        const allCalls = mockApp._sessionPatch.mock.calls;
+        expect(allCalls.some((c) => c[1]?.status === 'running')).toBe(true);
+      });
+
+      const result = await permissionPromise;
+      expect(result.behavior).toBe('allow');
+    });
+
+    it('resolves with deny behavior when user rejects the permission', async () => {
+      const service = Object.assign(new ClaudeAgentService(), {
+        app: mockApp,
+        _db: mockApp.get('db'),
+      });
+      let capturedCanUseTool;
+      let capturedRequestId;
+
+      query.mockImplementation(({ options }) => {
+        capturedCanUseTool = options.canUseTool;
+        return makeNeverEndingIterable();
+      });
+
+      mockApp._sessionEmit.mockImplementation((event, data) => {
+        if (event === 'permission:request') capturedRequestId = data.requestId;
+      });
+
+      const sessionRow = await db('sessions').where({ id: BASE_SESSION_ID }).first();
+      await service.createAgentSession(sessionRow);
+
+      const abortController = new AbortController();
+      const permissionPromise = capturedCanUseTool(
+        'Write',
+        { path: '/etc/passwd', content: 'x' },
+        { signal: abortController.signal }
+      );
+
+      await vi.waitFor(() => expect(capturedRequestId).toBeDefined());
+
+      await service.resolvePermission(BASE_SESSION_ID, capturedRequestId, {
+        approved: false,
+        reason: 'Too risky',
+      });
+
+      const result = await permissionPromise;
+      expect(result.behavior).toBe('deny');
+      expect(result.message).toBe('Too risky');
+    });
+  });
+
+  // ── 4. Assistant success ───────────────────────────────────────────────────
+
+  describe('assistant success', () => {
+    it('patches session status to completed when result is successful', async () => {
+      const service = Object.assign(new ClaudeAgentService(), {
+        app: mockApp,
+        _db: mockApp.get('db'),
+      });
+
+      query.mockImplementation(() =>
+        makeAsyncIterable([
+          { type: 'result', subtype: 'success', is_error: false, total_cost_usd: 0.002 },
+        ])
+      );
+
+      const sessionRow = await db('sessions').where({ id: BASE_SESSION_ID }).first();
+      await service.createAgentSession(sessionRow);
+
+      await vi.waitFor(() => {
+        expect(mockApp._sessionPatch).toHaveBeenCalledWith(
+          BASE_SESSION_ID,
+          { status: 'completed' },
+          expect.anything()
+        );
+      });
+    });
+
+    it('persists the result message to the messages service', async () => {
+      const service = Object.assign(new ClaudeAgentService(), {
+        app: mockApp,
+        _db: mockApp.get('db'),
+      });
+
+      query.mockImplementation(() =>
+        makeAsyncIterable([
+          { type: 'result', subtype: 'success', is_error: false, total_cost_usd: 0.005 },
+        ])
+      );
+
+      const sessionRow = await db('sessions').where({ id: BASE_SESSION_ID }).first();
+      await service.createAgentSession(sessionRow);
+
+      await vi.waitFor(() => {
+        expect(mockApp._messageCreate).toHaveBeenCalledWith(
+          expect.objectContaining({
+            session_id: BASE_SESSION_ID,
+            type: 'result',
+            subtype: 'success',
+            total_cost_usd: 0.005,
+          }),
+          expect.anything()
+        );
+      });
+    });
+  });
+
+  // ── 5. Assistant failure ───────────────────────────────────────────────────
+
+  describe('assistant failure', () => {
+    it('patches session status to failed when result has is_error=true', async () => {
+      const service = Object.assign(new ClaudeAgentService(), {
+        app: mockApp,
+        _db: mockApp.get('db'),
+      });
+
+      query.mockImplementation(() =>
+        makeAsyncIterable([{ type: 'result', subtype: 'error', is_error: true }])
+      );
+
+      const sessionRow = await db('sessions').where({ id: BASE_SESSION_ID }).first();
+      await service.createAgentSession(sessionRow);
+
+      await vi.waitFor(() => {
+        expect(mockApp._sessionPatch).toHaveBeenCalledWith(
+          BASE_SESSION_ID,
+          { status: 'failed' },
+          expect.anything()
+        );
+      });
+    });
+
+    it('patches session status to failed when the query stream throws', async () => {
+      const service = Object.assign(new ClaudeAgentService(), {
+        app: mockApp,
+        _db: mockApp.get('db'),
+      });
+
+      const errorIterable = {
+        [Symbol.asyncIterator]() {
+          return {
+            async next() {
+              throw new Error('Stream broken');
+            },
+          };
+        },
+        setPermissionMode: vi.fn(),
+        setModel: vi.fn(),
+        close: vi.fn(),
+      };
+      query.mockImplementation(() => errorIterable);
+
+      const sessionRow = await db('sessions').where({ id: BASE_SESSION_ID }).first();
+      await service.createAgentSession(sessionRow);
+
+      await vi.waitFor(() => {
+        expect(mockApp._sessionPatch).toHaveBeenCalledWith(
+          BASE_SESSION_ID,
+          { status: 'failed' },
+          expect.anything()
+        );
+      });
+
+      // Error forwarded to the client via sessions service emit
+      await vi.waitFor(() => {
+        expect(mockApp._sessionEmit).toHaveBeenCalledWith(
+          'app:error',
+          expect.objectContaining({ sessionId: BASE_SESSION_ID })
+        );
+      });
+
+      await vi.waitFor(() => {
+        expect(mockApp._messageCreate).toHaveBeenCalledWith(
+          expect.objectContaining({
+            session_id: BASE_SESSION_ID,
+            type: 'system',
+            subtype: 'status',
+            message_json: expect.stringContaining('Stream broken'),
+          }),
+          expect.anything()
+        );
+      });
+    });
+  });
+
+  // ── 6. onMessageCreated (imperative callback) ───────────────────────────────
+
+  describe('onMessageCreated', () => {
+    it('does nothing for non-user messages', async () => {
+      const service = Object.assign(new ClaudeAgentService(), {
+        app: mockApp,
+        _db: mockApp.get('db'),
+      });
+      const createAgentSessionSpy = vi
+        .spyOn(service, 'createAgentSession')
+        .mockResolvedValue({ channel: { push: vi.fn() } });
+
+      await service.onMessageCreated({
+        session_id: BASE_SESSION_ID,
+        type: 'assistant',
+        message_json: '{}',
+      });
+
+      expect(createAgentSessionSpy).not.toHaveBeenCalled();
+    });
+
+    it('pushes to active session channel when user message and session already active', async () => {
+      const service = Object.assign(new ClaudeAgentService(), {
+        app: mockApp,
+        _db: mockApp.get('db'),
+      });
+      query.mockImplementation(() => makeNeverEndingIterable());
+      const sessionRow = await db('sessions').where({ id: BASE_SESSION_ID }).first();
+      await service.createAgentSession(sessionRow);
+
+      const active = service.getActiveSession(BASE_SESSION_ID);
+      const pushSpy = vi.spyOn(active.channel, 'push');
+
+      const userMsg = { type: 'user', message: { role: 'user', content: 'Hi' } };
+      await service.onMessageCreated({
+        session_id: BASE_SESSION_ID,
+        type: 'user',
+        message_json: JSON.stringify(userMsg),
+      });
+
+      expect(pushSpy).toHaveBeenCalledWith(userMsg);
+    });
+
+    it('calls createAgentSession when user message and session has no claude_session_id', async () => {
+      const service = Object.assign(new ClaudeAgentService(), {
+        app: mockApp,
+        _db: mockApp.get('db'),
+      });
+
+      const userMsg = { type: 'user', message: { role: 'user', content: 'Start' } };
+      await service.onMessageCreated({
+        session_id: BASE_SESSION_ID,
+        type: 'user',
+        message_json: JSON.stringify(userMsg),
+      });
+
+      expect(query).toHaveBeenCalled();
+      await vi.waitFor(() => {
+        expect(service.getActiveSession(BASE_SESSION_ID)).toBeUndefined();
+      });
+    });
+  });
+});

@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="body-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffd166"/>
+      <stop offset="45%" stop-color="#f5a523"/>
+      <stop offset="100%" stop-color="#c97c10"/>
+    </linearGradient>
+    <linearGradient id="score-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#b86808"/>
+      <stop offset="100%" stop-color="#a05a05"/>
+    </linearGradient>
+    <filter id="dropshadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="2" stdDeviation="2.5" flood-color="#00000050"/>
+    </filter>
+  </defs>
+
+  <g transform="rotate(-38 32 32)" filter="url(#dropshadow)">
+    <!-- Main baguette body -->
+    <rect x="5" y="25" width="54" height="14" rx="7" fill="url(#body-grad)"/>
+
+    <!-- Top highlight -->
+    <rect x="10" y="26.5" width="44" height="4" rx="2" fill="white" opacity="0.22"/>
+
+    <!-- Scoring mark 1 -->
+    <ellipse cx="19" cy="32" rx="2.2" ry="4.5" fill="url(#score-grad)" opacity="0.75" transform="rotate(12 19 32)"/>
+    <!-- Scoring mark 2 -->
+    <ellipse cx="32" cy="32" rx="2.2" ry="4.5" fill="url(#score-grad)" opacity="0.75" transform="rotate(12 32 32)"/>
+    <!-- Scoring mark 3 -->
+    <ellipse cx="45" cy="32" rx="2.2" ry="4.5" fill="url(#score-grad)" opacity="0.75" transform="rotate(12 45 32)"/>
+  </g>
+</svg>

@@ -1,0 +1,63 @@
+# Copy this file to fly.toml and adjust the values below.
+# fly.toml is gitignored so your app name stays out of the repo.
+
+# Your Fly.io app name (chosen during `fly apps create` or `fly launch`)
+app = 'your-app-name'
+
+# Region closest to you. Run `fly platform regions` for the full list.
+# Common: iad (US East), lax (US West), cdg (Paris), lhr (London), sin (Singapore)
+primary_region = 'iad'
+
+[build]
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3000"
+  DATA_DIR = "/data"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+
+  # ── Machine start/stop strategy ──────────────────────────────────────────────
+  #
+  # Option A — Auto stop/start (pay-per-use, ~1–3s cold start on first request)
+  # The machine stops when idle and wakes automatically on the next request.
+  # In practice cold starts are rare: the active WebSocket connection keeps the
+  # machine running as long as any browser tab has the UI open.
+  # Active Claude sessions will be interrupted if the machine stops mid-session.
+  # Recommended for light personal use or when cost matters more than latency.
+  #
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  #
+  # Option B — Always on (no cold starts, uninterrupted sessions)
+  # Comment out the three lines above and uncomment these instead:
+  #
+  # auto_stop_machines = "off"
+  # auto_start_machines = false
+  # min_machines_running = 1
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  [http_service.health_check]
+    grace_period = "40s"
+    interval = "15s"
+    method = "GET"
+    path = "/up"
+    timeout = "2s"
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 25
+    soft_limit = 20
+
+[[vm]]
+  memory = "2gb"
+  cpu_kind = "shared"
+  cpus = 2
+
+[[mounts]]
+  source = "baguette_data"
+  destination = "/data"
+  initial_size = "10gb"

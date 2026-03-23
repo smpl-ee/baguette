@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Starting dev server...</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: monospace; background: #0d1117; color: #e6edf3; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; padding: 2rem; }
+    h1 { font-size: 1.25rem; margin-bottom: 1rem; color: #58a6ff; }
+    #logs { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 1rem; width: 100%; max-width: 800px; height: 400px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; font-size: 0.8rem; line-height: 1.5; }
+    .spinner { width: 1rem; height: 1rem; border: 2px solid #30363d; border-top-color: #58a6ff; border-radius: 50%; animation: spin 0.8s linear infinite; display: inline-block; margin-right: 0.5rem; vertical-align: middle; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #error { display: none; margin-top: 1rem; }
+    button { background: #21262d; border: 1px solid #30363d; color: #e6edf3; padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer; font-family: monospace; }
+    button:hover { background: #30363d; }
+  </style>
+</head>
+<body>
+  <h1><span class="spinner"></span>Starting dev server...</h1>
+  <pre id="logs"></pre>
+  <div id="error">
+    <p style="color: #f85149; margin-bottom: 0.75rem;">Dev server timed out.</p>
+    <form method="POST" action="/_baguette/retry">
+      <button type="submit">Retry</button>
+    </form>
+  </div>
+  <script>
+    const logs = document.getElementById('logs');
+    const error = document.getElementById('error');
+    const source = new EventSource('/_baguette/logs');
+
+    source.addEventListener('log', (e) => {
+      logs.textContent += JSON.parse(e.data);
+      logs.scrollTop = logs.scrollHeight;
+    });
+
+    source.addEventListener('ready', () => {
+      source.close();
+      window.location.reload();
+    });
+
+    source.addEventListener('timeout', () => {
+      source.close();
+      document.querySelector('.spinner').style.display = 'none';
+      document.querySelector('h1').textContent = 'Dev server timed out';
+      error.style.display = 'block';
+    });
+
+    source.addEventListener('error', (e) => {
+      if (e.data === undefined) return; // connection drop, not a server-sent error event
+      source.close();
+      document.querySelector('.spinner').style.display = 'none';
+      document.querySelector('h1').textContent = 'Dev server exited';
+      error.querySelector('p').textContent = 'The dev server process exited with a non-zero code.';
+      error.style.display = 'block';
+    });
+
+    source.onerror = () => {
+      // SSE connection dropped (e.g. server restart) — keep retrying
+    };
+  </script>
+</body>
+</html>

@@ -1,0 +1,66 @@
+<% require "dotenv"; Dotenv.load(".kamal/.env") if File.exist?(".kamal/.env") %>
+
+# Name of your application. Used to uniquely configure containers.
+service: baguette
+
+# Name of the container image.
+image: smpl-ee/baguette
+
+volumes:
+  - /home/<%= ENV.fetch('DEPLOY_USER', 'ubuntu') %>/baguette_storage:/data
+  - /var/run/docker.sock:/var/run/docker.sock
+
+# Deploy to these servers.
+servers:
+  web:
+    hosts:
+      - <%= ENV.fetch('DEPLOY_SERVER') %>
+
+ssh:
+  user: <%= ENV.fetch('DEPLOY_USER', 'ubuntu') %>
+
+# Don't keep too many old versions to preserve space.
+retain_containers: 2
+
+# How long kamal-proxy waits for /up on app_port (default 30). Migrations + entrypoint
+# (docker socket, compose network) can exceed that on slower disks.
+deploy_timeout: 120
+
+# Enable SSL auto certification via Let's Encrypt (and allow for multiple apps on one server).
+# If using something like Cloudflare, it is recommended to set encryption mode
+# in Cloudflare's SSL/TLS setting to "Full" to enable end-to-end encryption.
+proxy:
+  app_port: 3000
+  ssl:
+    certificate_pem: CERTIFICATE_PEM
+    private_key_pem: PRIVATE_KEY_PEM
+  hosts:
+    - www.<%= ENV.fetch('DOMAIN') %>
+    - "*.<%= ENV.fetch('DOMAIN') %>"
+
+# Use a local registry on the deploy server — no credentials needed.
+# Kamal automatically starts the registry and pushes the image to it.
+registry:
+  server: localhost:5555
+
+builder:
+  arch:
+    - amd64
+  remote: ssh://<%= ENV.fetch('DEPLOY_USER', 'ubuntu') %>@<%= ENV.fetch('DEPLOY_SERVER') %>
+  cache:
+    type: registry
+    options: mode=max
+    image: baguette-build-cache
+
+# Inject ENV variables into containers (secrets come from .env).
+# Remember to run `kamal env push` after making changes!
+env:
+  clear:
+    PUBLIC_HOST: https://www.<%= ENV.fetch('DOMAIN') %>
+  secret:
+    - GITHUB_CLIENT_ID
+    - GITHUB_CLIENT_SECRET
+    - ENCRYPTION_KEY
+
+aliases:
+  shell: app exec --interactive --reuse "bash"

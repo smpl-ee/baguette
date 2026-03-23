@@ -1,0 +1,584 @@
+import crypto from 'crypto';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import { NotFound, BadRequest } from '@feathersjs/errors';
+import { KnexService } from '@feathersjs/knex';
+const execFileAsync = promisify(execFile);
+import { loadBaguetteConfig, getAvailableCommands, getScriptCommand } from '../baguette-config.js';
+import {
+  removeWorktree,
+  gitDiff,
+  gitFetch,
+  mergePR,
+  getPRStatus,
+  createWorktree,
+  getOpenPRByNumber,
+  getOpenPR,
+} from '../github.js';
+import logger from '../../logger.js';
+import { requireUser, scopeByUser } from './hooks.js';
+import { PUBLIC_HOST, DATA_DIR, resolveDataDirRelativePath } from '../../config.js';
+import path from 'path';
+import { buildTaskEnv, buildClaudeEnv } from '../session-env.js';
+import { getEffectiveGithubToken } from '../agent-settings.js';
+
+function getPreviewAuthUri(shortId) {
+  const url = new URL('/preview', PUBLIC_HOST);
+  url.searchParams.set('session', shortId);
+  return url.toString();
+}
+
+/**
+ * Sessions service (table: sessions). All methods restricted to params.user's sessions.
+ */
+export class SessionsService extends KnexService {
+  setup(app) {
+    this.app = app;
+
+    // On startup, any session that was running or waiting for approval when the
+    // server last stopped is now orphaned — reset them to stopped and post a
+    // status message to each session's chat so users can see what happened.
+    app
+      .get('db')('sessions')
+      .whereIn('status', ['running', 'approval'])
+      .whereNull('archived_at')
+      .select('id', 'user_id')
+      .then(async (staleSessions) => {
+        if (staleSessions.length === 0) return;
+        const statusMessage = JSON.stringify({
+          type: 'system',
+          subtype: 'status',
+          status: 'Server restarted — session was stopped',
+        });
+        for (const session of staleSessions) {
+          const userParams = { user: { id: session.user_id } };
+          await app.service('messages').create(
+            {
+              session_id: session.id,
+              type: 'system',
+              subtype: 'status',
+              message_json: statusMessage,
+            },
+            userParams
+          );
+          await app.service('sessions').patch(session.id, { status: 'stopped' }, userParams);
+        }
+        logger.info(`Reset ${staleSessions.length} stale session(s) to stopped on startup`);
+      })
+      .catch((err) => {
+        logger.error(err, 'Failed to reset stale sessions on startup');
+      });
+  }
+
+  async getTaskEnv(sessionId) {
+    return buildTaskEnv(this.app.get('db'), sessionId);
+  }
+
+  async getClaudeEnv(sessionId) {
+    return buildClaudeEnv(this.app.get('db'), sessionId);
+  }
+
+  async removeByRepoId(repoId, params) {
+    const db = this.app.get('db');
+    const sessions = await db('sessions').where({ repo_id: repoId }).whereNull('archived_at');
+    for (const session of sessions) {
+      await this.remove(session.id, { user: params?.user });
+    }
+  }
+
+  async remove(id, params) {
+    const userId = params?.user?.id;
+    const session = await this.options.Model('sessions').where({ id, user_id: userId }).first();
+    if (!session) throw new NotFound('Session not found');
+    if (session.archived_at) throw new BadRequest('Session already archived');
+
+    await this.app.service('claude-agent').stopSession(session.id);
+    await this._runCleanupAndFinalize(session);
+    return session;
+  }
+
+  async _runCleanupAndFinalize(session) {
+    if (session.worktree_path) {
+      const baguetteConfig = await loadBaguetteConfig(session.worktree_path);
+      const cleanupCommand = getScriptCommand(baguetteConfig?.session?.cleanup);
+      if (cleanupCommand) {
+        try {
+          await this.app.service('tasks').create(
+            {
+              session_id: session.id,
+              command: cleanupCommand,
+              skipInit: true,
+              onExit: async () => {
+                try {
+                  await this._finalizeRemoval(session.id);
+                } catch (err) {
+                  logger.error(err, 'session deletion error after cleanup');
+                }
+              },
+            },
+            { user: { id: session.user_id } }
+          );
+          return;
+        } catch (err) {
+          logger.error(err, 'session.cleanup task error');
+        }
+      }
+    }
+    await this._finalizeRemoval(session.id);
+  }
+
+  async _finalizeRemoval(sessionId) {
+    const db = this.app.get('db');
+    const session = await db('sessions').where({ id: sessionId }).first();
+    const repo = session?.repo_id ? await db('repos').where({ id: session.repo_id }).first() : null;
+    await removeWorktree(session, repo);
+    this.app.service('tasks').deleteSessionTasks(sessionId);
+    const archivedAt = new Date().toISOString();
+    await db('sessions').where({ id: sessionId }).update({ archived_at: archivedAt });
+    const updated = await db('sessions').where({ id: sessionId }).first();
+    this.emit('patched', updated);
+  }
+
+  async stop(data, params) {
+    const session = params.resolvedSession;
+    await this.app.service('claude-agent').stopSession(session.id);
+    await this.app
+      .service('sessions')
+      .patch(session.id, { status: 'stopped' }, { user: { id: session.user_id } });
+    return { ok: true };
+  }
+
+  async commands(data, params) {
+    const session = params.resolvedSession;
+    if (!session?.worktree_path) return { commands: [] };
+    const baguetteConfig = await loadBaguetteConfig(session.worktree_path);
+    return { commands: getAvailableCommands(baguetteConfig) };
+  }
+
+  async resolvePermission(data, params) {
+    const { sessionId, requestId, approved, reason, answers } = data;
+    const userId = params.user?.id;
+    const db = this.app.get('db');
+    const session = await db('sessions').where({ id: sessionId, user_id: userId }).first();
+    if (!session) throw new NotFound('Session not found');
+
+    const claudeAgent = this.app.service('claude-agent');
+    const entry = claudeAgent.getActiveSession(sessionId)?.permissionRequests?.get(requestId);
+    const toolName = entry?.toolName;
+
+    await claudeAgent.resolvePermission(sessionId, requestId, { approved, reason, answers });
+
+    this.emit('permission:handled', { requestId, sessionId, user_id: userId });
+
+    if (approved && toolName === 'ExitPlanMode') {
+      await this.app.service('sessions').patch(sessionId, { plan_mode: 0 }, { user: params.user });
+    }
+
+    return { ok: true };
+  }
+
+  async diff(data, params) {
+    const session = params.resolvedSession;
+    // Refresh PR status in the background (skip if already merged)
+    if (session?.pr_number && session.pr_status !== 'merged') {
+      const db = this.app.get('db');
+      db('users')
+        .where({ id: session.user_id })
+        .first()
+        .then((user) => {
+          const token = getEffectiveGithubToken(user);
+          if (!token) return;
+          return getPRStatus(token, session.repo_full_name, session.pr_number).then((pr_status) => {
+            if (pr_status !== session.pr_status) {
+              this.app
+                .service('sessions')
+                .patch(
+                  session.id,
+                  { pr_status },
+                  { provider: undefined, user: { id: session.user_id } }
+                );
+            }
+          });
+        })
+        .catch(() => {});
+    }
+    if (!session?.worktree_path) return { diff: '' };
+    const cwd = resolveDataDirRelativePath(session.worktree_path);
+    try {
+      const db = this.app.get('db');
+      const user = await db('users').where({ id: session.user_id }).first();
+      const token = getEffectiveGithubToken(user);
+      if (token && session.base_branch) {
+        await gitFetch(cwd, token, session.base_branch).catch(() => {});
+      }
+      return { diff: await gitDiff(cwd, session.base_branch) };
+    } catch (err) {
+      return { diff: '', error: err.message };
+    }
+  }
+
+  async showDiff(data, params) {
+    const session = params.resolvedSession;
+    if (!session?.worktree_path) return { path: data.path, diff: '' };
+    const cwd = resolveDataDirRelativePath(session.worktree_path);
+    try {
+      const diff = await gitDiff(cwd, session.base_branch, {
+        filePath: data.path,
+      });
+      return { path: data.path, diff };
+    } catch (err) {
+      return { path: data.path, diff: '', error: err.message };
+    }
+  }
+
+  async merge(data, params) {
+    const session = params.resolvedSession;
+    if (!session?.pr_number) throw new BadRequest('No PR to merge');
+    const db = this.app.get('db');
+    const user = await db('users').where({ id: session.user_id }).first();
+    const token = getEffectiveGithubToken(user);
+    if (!token) throw new BadRequest('No GitHub token configured');
+    await mergePR(token, session.repo_full_name, session.pr_number);
+    await this.app
+      .service('sessions')
+      .patch(
+        session.id,
+        { pr_status: 'merged' },
+        { provider: undefined, user: { id: session.user_id } }
+      );
+    return { ok: true };
+  }
+
+  async onMessageCreated(message) {
+    const sessionId = message.session_id;
+    if (!sessionId) return;
+
+    let status;
+    let costUpdate = null;
+    if (message.type === 'user') {
+      status = 'running';
+    } else if (message.type === 'result') {
+      const subtype = message.subtype;
+      status = 'failed';
+      try {
+        const parsed = JSON.parse(message.message_json || '{}');
+        if (subtype === 'success' && !parsed.is_error) status = 'completed';
+        if (parsed.total_cost_usd != null) costUpdate = parsed.total_cost_usd;
+      } catch {
+        /* invalid agent result JSON */
+      }
+    }
+
+    if (status === undefined && costUpdate === null) return;
+
+    const db = this.app.get('db');
+    const session = await db('sessions').where({ id: sessionId }).first();
+    if (!session) return;
+
+    const patch = {};
+    if (status !== undefined && session.status !== status) patch.status = status;
+    if (costUpdate !== null) {
+      const prevCost = parseFloat(session.total_cost_usd ?? 0);
+      const diff = costUpdate - prevCost;
+      if (diff > 0) {
+        await db('usage').insert({
+          session_id: sessionId,
+          user_id: session.user_id,
+          repo_full_name: session.repo_full_name,
+          cost_usd: diff,
+        });
+      }
+      patch.total_cost_usd = costUpdate;
+    }
+    if (Object.keys(patch).length === 0) return;
+
+    await this.app.service('sessions').patch(sessionId, patch, {
+      provider: undefined,
+      user: { id: session.user_id },
+    });
+  }
+}
+
+async function requireOwnSession(context) {
+  const db = context.app.get('db');
+  const id = context.id;
+  const userId = context.params.user?.id;
+  if (id == null) return context; // multi-patch, skip
+  const session = await db('sessions').where({ id, user_id: userId }).first();
+  if (!session) throw new NotFound('Session not found');
+  // Clear params.knex: scopeByUser set it to a SELECT builder which gets consumed
+  // by _patch's UPDATE step, causing _findOrGet to return 0 rows. Ownership is
+  // already verified above, so the plain id-based query in _patch is sufficient.
+  delete context.params.knex;
+  return context;
+}
+
+async function ensureShortId(context) {
+  if (!context.data.short_id) {
+    context.data.short_id = crypto.randomBytes(2).toString('hex');
+  }
+  return context;
+}
+
+async function prepareSessionEnvironment(context) {
+  const continueExistingBranch =
+    context.data.agent_type !== 'reviewer' && Boolean(context.data.continue_existing_branch);
+  delete context.data.continue_existing_branch;
+
+  const {
+    repo_full_name: repoFullName,
+    agent_type: agentType,
+    base_branch: baseBranch,
+    pr_number: prNumber,
+  } = context.data;
+  if (!repoFullName) return context; // headless/system session — no worktree needed
+
+  const db = context.app.get('db');
+  const token = getEffectiveGithubToken(context.params.user);
+  const shortId = context.data.short_id;
+  const repo = await db('repos').where({ full_name: repoFullName }).first();
+
+  if (agentType === 'reviewer') {
+    const pr = await getOpenPRByNumber(token, repoFullName, prNumber);
+    const { worktreePath: absoluteWorktreePath } = await createWorktree(
+      repo,
+      pr.head.ref,
+      shortId,
+      token,
+      { baseBranch: pr.base.ref }
+    );
+    Object.assign(context.data, {
+      worktree_path: path.relative(DATA_DIR, absoluteWorktreePath),
+      repo_id: repo.id,
+      pr_number: pr.number,
+      pr_url: pr.html_url,
+      pr_status: 'open',
+      base_branch: pr.base.ref,
+      created_branch: pr.head.ref,
+      remote_branch: pr.head.ref,
+      label: `Review: ${pr.title}`,
+    });
+  } else if (continueExistingBranch) {
+    const workingBranch = baseBranch;
+    const branchInUse = await db('sessions')
+      .where({ repo_full_name: repoFullName })
+      .whereNull('archived_at')
+      .where((q) =>
+        q.where('created_branch', workingBranch).orWhere('remote_branch', workingBranch)
+      )
+      .first();
+    if (branchInUse) {
+      throw new BadRequest(
+        `Another active session is already using branch "${workingBranch}". Stop or archive it before continuing on this branch.`
+      );
+    }
+
+    const defaultForDiff = repo.default_branch || 'main';
+    let openPr = null;
+    try {
+      openPr = await getOpenPR(token, repoFullName, workingBranch);
+    } catch (err) {
+      logger.error(err, 'getOpenPR during continue-existing-branch session (non-fatal)');
+    }
+    const baseBranchForWorktree = openPr?.base_ref ?? defaultForDiff;
+
+    const { worktreePath: absoluteWorktreePath } = await createWorktree(
+      repo,
+      workingBranch,
+      shortId,
+      token,
+      { detach: false, baseBranch: baseBranchForWorktree }
+    );
+    Object.assign(context.data, {
+      worktree_path: path.relative(DATA_DIR, absoluteWorktreePath),
+      repo_id: repo.id,
+      created_branch: workingBranch,
+      remote_branch: workingBranch,
+    });
+
+    if (openPr) {
+      Object.assign(context.data, {
+        base_branch: openPr.base_ref,
+        pr_url: openPr.html_url,
+        pr_number: openPr.number,
+        pr_status: openPr.draft ? 'draft' : 'open',
+        label: openPr.title,
+      });
+    } else {
+      context.data.base_branch = defaultForDiff;
+      context.data.label = `Continuing: ${workingBranch}`;
+    }
+  } else {
+    const { worktreePath: absoluteWorktreePath } = await createWorktree(
+      repo,
+      baseBranch,
+      shortId,
+      token
+    );
+    Object.assign(context.data, {
+      worktree_path: path.relative(DATA_DIR, absoluteWorktreePath),
+      repo_id: repo.id,
+    });
+    const branchPrefix = context.params.user?.branch_prefix ?? '';
+    const fallbackBranch = `${branchPrefix}task-${shortId}`;
+    let branchName = fallbackBranch;
+    try {
+      const result = await context.app
+        .service('claude-agent')
+        .generateSessionMetadata(context.data.initial_prompt || '', shortId, context.params.user);
+      if (result.label) context.data.label = result.label;
+      branchName = result.branchName ? `${branchPrefix}${result.branchName}` : fallbackBranch;
+    } catch (err) {
+      logger.error(err, 'Metadata generation error (non-fatal)');
+    }
+    try {
+      await execFileAsync('git', ['checkout', '-b', branchName], {
+        cwd: absoluteWorktreePath,
+        stdio: 'pipe',
+      });
+    } catch {
+      branchName = fallbackBranch;
+      await execFileAsync('git', ['checkout', '-b', branchName], {
+        cwd: absoluteWorktreePath,
+        stdio: 'pipe',
+      });
+    }
+    context.data.created_branch = branchName;
+    context.data.remote_branch = branchName;
+  }
+  return context;
+}
+
+export async function resolveSessionFromData(context) {
+  // context.data may be a plain session ID or an object with an `id` field
+  const sessionId = context.data?.id ?? context.data;
+  const session = await context.service.get(sessionId, { user: context.params.user });
+  context.params.resolvedSession = session;
+  return context;
+}
+
+async function withHasWebserver(session) {
+  if (!session) return session;
+  const absoluteWorktreePath = resolveDataDirRelativePath(session.worktree_path);
+  const config = session.worktree_path ? await loadBaguetteConfig(session.worktree_path) : null;
+  return {
+    ...session,
+    absolute_worktree_path: absoluteWorktreePath ?? null,
+    preview_url: config?.webserver && getPreviewAuthUri(session.short_id),
+  };
+}
+
+async function addHasWebserver(context) {
+  const result = context.result;
+  if (!result) return context;
+  if (Array.isArray(result?.data)) {
+    context.result = { ...result, data: await Promise.all(result.data.map(withHasWebserver)) };
+  } else if (Array.isArray(result)) {
+    context.result = await Promise.all(result.map(withHasWebserver));
+  } else {
+    context.result = await withHasWebserver(result);
+  }
+  return context;
+}
+
+async function syncSessionSettingsAfterPatch(context) {
+  if (context.id != null && context.result) {
+    await context.app
+      .service('claude-agent')
+      .syncSessionSettingsFromPatch(context.id, context.result);
+  }
+  return context;
+}
+
+function extractInitialFiles(context) {
+  const files = context.data.initial_files;
+  if (files) {
+    context.params.initialFiles = files;
+    delete context.data.initial_files;
+  }
+  return context;
+}
+
+export function registerSessionsService(app, path = 'sessions') {
+  const options = {
+    Model: app.get('db'),
+    name: 'sessions',
+    id: 'id',
+    paginate: app.get('paginate') || { default: 20, max: 100 },
+  };
+  app.use(path, new SessionsService(options), {
+    events: ['permission:request', 'permission:handled', 'app:error'],
+    methods: [
+      'find',
+      'get',
+      'create',
+      'patch',
+      'remove',
+      'stop',
+      'commands',
+      'resolvePermission',
+      'diff',
+      'showDiff',
+      'merge',
+    ],
+  });
+  app.service(path).hooks(sessionsHooks);
+}
+
+function applyGroupSort(context) {
+  if (context.params.knex) {
+    delete context.params.query?.$sort;
+    context.params.knex = context.params.knex.orderByRaw(`
+      CASE WHEN archived_at IS NOT NULL THEN 2
+           WHEN pr_status = 'merged' THEN 1
+           ELSE 0
+      END ASC,
+      created_at DESC
+    `);
+  }
+  return context;
+}
+
+export const sessionsHooks = {
+  before: {
+    all: [requireUser, scopeByUser],
+    find: [applyGroupSort],
+    create: [ensureShortId, prepareSessionEnvironment, extractInitialFiles],
+    patch: [requireOwnSession],
+    stop: [resolveSessionFromData],
+    commands: [resolveSessionFromData],
+    diff: [resolveSessionFromData],
+    showDiff: [resolveSessionFromData],
+    merge: [resolveSessionFromData],
+    resolvePermission: [requireUser],
+  },
+  after: {
+    find: [addHasWebserver],
+    get: [addHasWebserver],
+    create: [createFirstMessage, addHasWebserver],
+    patch: [syncSessionSettingsAfterPatch, addHasWebserver],
+  },
+};
+
+async function createFirstMessage(context) {
+  const session = context.result;
+  const initialPrompt = session.initial_prompt;
+  if (!initialPrompt) return context;
+  const initialFiles = context.params.initialFiles;
+  const content = initialFiles?.length
+    ? [{ type: 'text', text: initialPrompt }, ...initialFiles]
+    : initialPrompt;
+  const initialSdkMessage = {
+    type: 'user',
+    message: { role: 'user', content },
+  };
+  await context.app.service('messages').create(
+    {
+      session_id: session.id,
+      type: 'user',
+      message_json: JSON.stringify(initialSdkMessage),
+    },
+    { user: context.params.user }
+  );
+  return context;
+}

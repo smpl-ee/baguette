@@ -1,0 +1,10 @@
+node_modules
+client/node_modules
+client/dist
+dist
+*.lock
+pnpm-lock.yaml
+package-lock.json
+.kamal
+config/deploy.yml
+.data

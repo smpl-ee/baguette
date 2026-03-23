@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+client/node_modules/
+client/dist/
+.data/
+.DS_Store
+config/credentials/
+.kamal/.env
+fly.toml

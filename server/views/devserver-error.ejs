@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title><%- title %></title>
+  <style>
+    body { font-family: monospace; background: #0d1117; color: #e6edf3; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; padding: 2rem; }
+    h1 { color: #f85149; margin-bottom: 1rem; }
+    button { background: #21262d; border: 1px solid #30363d; color: #e6edf3; padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer; font-family: monospace; }
+    button:hover { background: #30363d; }
+  </style>
+</head>
+<body>
+  <h1><%- title %></h1>
+  <p style="margin-bottom: 1rem;"><%- message %></p>
+  <form method="POST" action="/_baguette/retry">
+    <button type="submit">Retry</button>
+  </form>
+</body>
+</html>
