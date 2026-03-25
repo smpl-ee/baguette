@@ -25,7 +25,7 @@ export async function loadBaguetteConfig(worktreePath) {
 }
 
 const PLACEHOLDER_REGEX = /\$\{\{\s*baguette\.secrets\.([A-Za-z0-9_]+)\s*\}\}/g;
-const SHORT_ID_REGEX = /\$\{\{\s*baguette\.session\.shortId\s*\}\}/g;
+const SHORT_ID_REGEX = /\$\{\{\s*baguette\.session\.short_id\s*\}\}/g;
 const PUBLIC_URI_REGEX = /\$\{\{\s*baguette\.session\.public_uri\s*\}\}/g;
 
 export function interpolateEnv(template, { shortId, secrets, publicUri }) {

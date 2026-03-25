@@ -48,7 +48,7 @@ Placeholders are interpolated at injection time (when starting Claude or tasks).
 | Placeholder                          | Description                                                                              |
 | ------------------------------------ | ---------------------------------------------------------------------------------------- |
 | `${{ baguette.secrets.KEY }}`        | Value of the secret named `KEY` from Settings → Secrets                                  |
-| `${{ baguette.session.shortId }}`    | The session's 4-character hex identifier                                                 |
+| `${{ baguette.session.short_id }}`    | The session's 4-character hex identifier                                                 |
 | `${{ baguette.session.public_uri }}` | Public URL where Baguette proxies this session's dev server (requires `webserver` block) |
 
 ### `webserver` block
@@ -67,8 +67,8 @@ Baguette can proxy a dev server running inside the session, making it accessible
 config:
   session:
     env:
-      DB_DEV_URL: postgres://postgres:${{ baguette.secrets.PG_PASSWORD }}@localhost:5432/app_${{ baguette.session.shortId }}_dev
-      DB_TEST_URL: postgres://postgres:${{ baguette.secrets.PG_PASSWORD }}@localhost:5432/app_${{ baguette.session.shortId }}_test
+      DB_DEV_URL: postgres://postgres:${{ baguette.secrets.PG_PASSWORD }}@localhost:5432/app_${{ baguette.session.short_id }}_dev
+      DB_TEST_URL: postgres://postgres:${{ baguette.secrets.PG_PASSWORD }}@localhost:5432/app_${{ baguette.session.short_id }}_test
       NEXT_PUBLIC_APP_URL: ${{ baguette.session.public_uri }}
     init: |
       npm install

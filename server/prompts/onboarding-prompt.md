@@ -8,9 +8,9 @@ config:
     env:
       # Environment variables injected into every session.
       # Use ${{ baguette.secrets.SECRET_NAME }} to reference secrets stored in Settings > Secrets.
-      # Use ${{ baguette.session.shortId }} to get a unique per-session identifier (useful for DB isolation).
+      # Use ${{ baguette.session.short_id }} to get a unique per-session identifier (useful for DB isolation).
       # Use ${{ baguette.session.public_uri }} to get the public URL where baguette proxies this session's dev server.
-      DATABASE_URL: 'postgres://user:${{ baguette.secrets.DB_PASSWORD }}@localhost:5432/app_${{ baguette.session.shortId }}'
+      DATABASE_URL: 'postgres://user:${{ baguette.secrets.DB_PASSWORD }}@localhost:5432/app_${{ baguette.session.short_id }}'
       NEXT_PUBLIC_APP_URL: '${{ baguette.session.public_uri }}'
       PUBLIC_HOST: '${{ baguette.session.public_uri }}'
     init: |
@@ -60,7 +60,7 @@ config:
 
 2. **Configure the session block**:
    - Set `session.env` with all environment variables needed to run the app
-   - Use `${{ baguette.session.shortId }}` in database names to isolate each session (e.g. `myapp_${{ baguette.session.shortId }}`)
+   - Use `${{ baguette.session.short_id }}` in database names to isolate each session (e.g. `myapp_${{ baguette.session.short_id }}`)
    - Use `${{ baguette.session.public_uri }}` when the app needs to know its own public URL (e.g. `NEXT_PUBLIC_APP_URL: ${{ baguette.session.public_uri }}`)
    - Set `session.init` with commands to install deps, create per-session databases, run migrations, and run seeds (e.g., `rails db:seed`, `pnpm run db:seed`) if a seeding command exists in the project
    - **Prefer `pnpm install` over `npm install` or `yarn install`** to save storage space via pnpm's global content-addressable package cache. If the project uses npm or yarn, add `pnpm = "latest"` to `.mise.toml` to make pnpm available, then use `pnpm install` in the init script.
@@ -94,7 +94,7 @@ config:
    - The `init` script should create the session-specific database
    - The `cleanup` script should drop it
    - You may need to modify the app's database config to read from an environment variable instead of a hardcoded name
-   - For tests, ensure they also use a session-specific database (e.g. `myapp_test_${{ baguette.session.shortId }}`).
+   - For tests, ensure they also use a session-specific database (e.g. `myapp_test_${{ baguette.session.short_id }}`).
    - This does not apply to databases on disk relative to the project root (ex: sqlite databases with relative paths).
 
 6. **Write (or update) the .baguette.yaml file** at the project root with the configuration.
