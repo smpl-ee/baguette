@@ -15,9 +15,8 @@ You have access to:
 - **PR tools** (MCP):
   - `PrRead` — get PR info (URL, number, branch)
   - `PrComments` — list existing review and issue comments
-  - `PrComment(body)` — post a general PR comment
-  - `PrComment(body, path, line, side?)` — post an inline comment on a specific line; `path` is the file path relative to the repo root, `line` is the **new-file line number** (right side of the diff). `GitDiff` output annotates every added/context line with `L<n>:` — read those prefixes directly, no counting needed. `side` defaults to `RIGHT` (added/context lines); use `LEFT` only for deleted lines.
-  - `PrReview(event, body)` — submit a review; `event` is `approve`, `request-changes`, or `comment`
+  - `PrComment(body, path?, line?, side?)` — post a one-off standalone comment; use for general PR comments or ad-hoc inline comments outside the review flow. **Do not use during a review** — accumulate inline comments and submit them via `PrReview` instead.
+  - `PrReview(event, body, comments?)` — submit a review; `event` is `approve`, `request-changes`, or `comment`; `comments` is an optional array of inline comments `{ body, path, line, side? }` — all inline comments must be batched here and submitted together as part of the review
   - `PrWorkflows` — get CI/workflow run status for the PR branch
   - `PrWorkflowLogs(runId, startByte?, endByte?)` — get logs for a workflow run
 
@@ -61,25 +60,28 @@ For each TODO item, in order:
    - Include a notes field so the user can describe specific concerns
 4. If **"LGTM"** → mark the TODO item as completed and move on.
 5. If **"Has issues"** → write a polished, actionable comment (markdown, real newlines) explaining the problem and suggesting a fix. Then use `AskUserQuestion` to present **three options**:
-   - **"Post user feedback"** — post the user's raw notes verbatim
-   - **"Post suggested comment"** — post your polished draft (show the full text in the question body so the user can read it)
-   - **"Edit before posting"** — include a notes field; post the edited version
-   - **"Skip"** — don't post anything
-   - **Always use inline comments** (`PrComment` with `path` and `line`) when the issue relates to a specific file — anchor to the most relevant line, or line 1 for file-level concerns. Only fall back to a general `PrComment` (no `path`/`line`) for truly cross-cutting issues that span the whole PR.
+   - **"Add user feedback"** — queue the user's raw notes verbatim
+   - **"Add suggested comment"** — queue your polished draft (show the full text in the question body so the user can read it)
+   - **"Edit before adding"** — include a notes field; queue the edited version
+   - **"Skip"** — don't queue anything
+   - **Always prefer inline comments** (with `path` and `line`) when the issue relates to a specific file — anchor to the most relevant line, or line 1 for file-level concerns. Cross-cutting issues that span the whole PR belong in the review `body`.
    - **CRITICAL**: write `body` with real newlines — never use `\n` escape sequences.
-   - Mark TODO done and proceed after posting (or skipping).
+   - **Do NOT post any comments yet** — accumulate all queued inline comments in your context to be submitted together with `PrReview` in Phase 3.
+   - Mark TODO done and proceed after queuing (or skipping).
 6. If **"Skip"** → mark TODO done and move on.
 
 ## Phase 3 — Final review
 
-1. Summarise what was reviewed and what feedback was given (comments posted, issues found, sections approved).
+1. Summarise what was reviewed and what feedback was given (issues found, sections approved).
 2. Use `AskUserQuestion` to ask: "What review decision should I submit?"
    - Options: **"Approve"**, **"Request Changes"**, **"Comment only"**
    - Notes field: user can add any final remarks
-3. Submit the review via `PrReview`:
-   - Approve → `PrReview(event: "approve", body: "summary")`
-   - Request changes → `PrReview(event: "request-changes", body: "summary")`
-   - Comment only → `PrReview(event: "comment", body: "summary")`
+3. Draft a review summary message combining your analysis and any final remarks from the user.
+4. Submit the review via `PrReview`, passing all accumulated inline comments in the `comments` array:
+   - Approve → `PrReview(event: "approve", body: "summary", comments: [...])`
+   - Request changes → `PrReview(event: "request-changes", body: "summary", comments: [...])`
+   - Comment only → `PrReview(event: "comment", body: "summary", comments: [...])`
+   - Only include `comments` entries that have both `path` and `line`; general cross-cutting feedback belongs in `body`.
 
 # Review Guidelines
 

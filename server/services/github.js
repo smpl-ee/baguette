@@ -608,9 +608,29 @@ export async function createPRLineComment(
 /**
  * Submits a PR review.
  * @param {string} event - 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT'
+ * @param {Array<{body, path, line, side?}>} [comments] - Optional inline comments to include in the review
+ * @param {string} [commitId] - Required when comments are provided
  * @returns {{ id, state, body }}
  */
-export async function createPRReview(token, repoFullName, prNumber, event, body) {
+export async function createPRReview(
+  token,
+  repoFullName,
+  prNumber,
+  event,
+  body,
+  comments = [],
+  commitId = null
+) {
+  const payload = { body, event };
+  if (comments.length > 0) {
+    payload.comments = comments.map((c) => ({
+      path: c.path,
+      line: c.line,
+      body: c.body,
+      side: c.side || 'RIGHT',
+    }));
+    if (commitId) payload.commit_id = commitId;
+  }
   const res = await fetch(
     `https://api.github.com/repos/${repoFullName}/pulls/${prNumber}/reviews`,
     {
@@ -621,7 +641,7 @@ export async function createPRReview(token, repoFullName, prNumber, event, body)
         Accept: 'application/vnd.github.v3+json',
         'User-Agent': 'baguette-app',
       },
-      body: JSON.stringify({ body, event }),
+      body: JSON.stringify(payload),
     }
   );
   if (!res.ok) {

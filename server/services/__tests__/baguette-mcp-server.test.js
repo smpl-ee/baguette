@@ -524,7 +524,15 @@ describe('PrReview', () => {
       await callTool(tools, 'PrReview', { event: 'approve', body: 'LGTM' })
     );
     expect(result.ok).toBe(true);
-    expect(createPRReview).toHaveBeenCalledWith('ghtoken', 'owner/repo', 42, 'APPROVE', 'LGTM');
+    expect(createPRReview).toHaveBeenCalledWith(
+      'ghtoken',
+      'owner/repo',
+      42,
+      'APPROVE',
+      'LGTM',
+      [],
+      null
+    );
   });
 
   it('maps request-changes → REQUEST_CHANGES', async () => {
@@ -536,7 +544,31 @@ describe('PrReview', () => {
       'owner/repo',
       42,
       'REQUEST_CHANGES',
-      'Fix this'
+      'Fix this',
+      [],
+      null
+    );
+  });
+
+  it('passes inline comments and commitId when comments are provided', async () => {
+    execFile.mockImplementationOnce((_cmd, _args, _opts, cb) =>
+      cb(null, { stdout: 'abc1234\n', stderr: '' })
+    );
+    createPRReview.mockResolvedValue({ id: 3 });
+    const { tools } = buildServer({ pr_number: 42 });
+    const comments = [{ body: 'Fix this', path: 'src/foo.js', line: 10 }];
+    const result = parseResult(
+      await callTool(tools, 'PrReview', { event: 'comment', body: 'Has issues', comments })
+    );
+    expect(result.ok).toBe(true);
+    expect(createPRReview).toHaveBeenCalledWith(
+      'ghtoken',
+      'owner/repo',
+      42,
+      'COMMENT',
+      'Has issues',
+      comments,
+      'abc1234'
     );
   });
 });

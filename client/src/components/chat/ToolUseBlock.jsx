@@ -631,11 +631,18 @@ export default function ToolUseBlock({ block, worktreePath, sessionId }) {
       );
     }
     if (toolShortName === 'PrReview') {
+      const commentCount = block.input?.comments?.length ?? 0;
+      const detail = [
+        block.input?.body?.slice(0, 60),
+        commentCount > 0 ? `${commentCount} inline comment${commentCount > 1 ? 's' : ''}` : null,
+      ]
+        .filter(Boolean)
+        .join(' · ');
       return (
         <QuietToolBlock
           icon="⚙"
           label={`PrReview:${block.input?.event ?? ''}`}
-          detail={block.input?.body?.slice(0, 60)}
+          detail={detail}
           isError={block.isError}
           result={block.result}
         />

@@ -249,7 +249,6 @@ export class ClaudeAgentService {
       'mcp__baguette__PrRead',
       'mcp__baguette__PrComments',
       'mcp__baguette__PrComment',
-      'mcp__baguette__PrReview',
       'mcp__baguette__PrWorkflows',
       'mcp__baguette__PrWorkflowLogs',
       'mcp__baguette__GitDiff',
