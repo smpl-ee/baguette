@@ -34,8 +34,8 @@ describe('Tasks service — in-memory', (hooks) => {
     // Reset in-memory tasks between tests so IDs are predictable.
 
     await db('users').insert([
-      { github_id: 1001, username: 'alice', access_token: 'token1', approved: true },
-      { github_id: 1002, username: 'bob', access_token: 'token2', approved: true },
+      { github_id: 1001, username: 'alice', approved: true },
+      { github_id: 1002, username: 'bob', approved: true },
     ]);
     const u1 = await db('users').where({ username: 'alice' }).first();
     const u2 = await db('users').where({ username: 'bob' }).first();
@@ -118,7 +118,6 @@ describe('Tasks service — in-memory', (hooks) => {
       await db('users').insert({
         github_id: 1003,
         username: 'carol',
-        access_token: 'tok3',
         approved: true,
       });
       const userId3 = (await db('users').where({ username: 'carol' }).first()).id;

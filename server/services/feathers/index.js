@@ -6,6 +6,7 @@ import { registerTasksService } from './tasks.service.js';
 import { registerSecretsService } from './secrets.service.js';
 import { registerUsersService } from './users.service.js';
 import { registerReposService } from './repos.service.js';
+import { registerUserReposService } from './user-repos.service.js';
 import { registerClaudeAgentService } from './claude-agent.service.js';
 
 /**
@@ -22,6 +23,7 @@ export function registerFeathersServices(app) {
   registerSecretsService(app);
   registerUsersService(app);
   registerReposService(app);
+  registerUserReposService(app);
 
   app.service('sessions').publish((data) => {
     return app.channel(`user/${data.user_id}`);

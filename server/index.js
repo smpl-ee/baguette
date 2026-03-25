@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 
 import logger from './logger.js';
 import { SDK_QUERY_CLOSED_MESSAGE } from './claude-agent-sdk-constants.js';
-import authRoutes from './routes/auth.js';
+import { createAuthRoutes } from './routes/auth.js';
 import { PUBLIC_HOST, ENCRYPTION_KEY } from './config.js';
 import settingsRoutes from './routes/settings.js';
 import { createFeathersApp, cookieAuthMiddleware, configureChannels } from './feathers.js';
@@ -63,7 +63,7 @@ app.use(async (req, res, next) => {
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(cookieAuthMiddleware);
+app.use(cookieAuthMiddleware(app));
 app.configure(rest());
 registerFeathersServices(app);
 
@@ -91,7 +91,7 @@ app.hooks({
   },
 });
 
-app.use(authRoutes);
+app.use(createAuthRoutes(app));
 app.use(settingsRoutes);
 
 if (process.env.VITE_SERVER_ENABLED !== 'true') {

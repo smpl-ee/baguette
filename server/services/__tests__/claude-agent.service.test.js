@@ -28,7 +28,6 @@ vi.mock('../github.js', async (importOriginal) => {
 });
 
 vi.mock('../agent-settings.js', () => ({
-  getAnthropicApiKeyFromUser: vi.fn(),
   getAgentModelFromUser: vi.fn(),
   getAllowedCommandsFromUser: vi.fn().mockReturnValue([]),
   getEffectiveGithubToken: vi.fn((user) => user?.access_token || null),
@@ -53,7 +52,7 @@ vi.mock('child_process', () => ({
 import path from 'path';
 import { createTestDb } from '../../test-utils/db.js';
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import { getAnthropicApiKeyFromUser, getAgentModelFromUser } from '../agent-settings.js';
+import { getAgentModelFromUser } from '../agent-settings.js';
 import { loadBaguetteConfig } from '../baguette-config.js';
 
 import { REPOS_DIR } from '../../config.js';
@@ -149,7 +148,7 @@ const BASE_SESSION_DATA = {
 };
 let BASE_SESSION_ID; // auto-generated integer id, set in beforeEach
 
-const BASE_USER = { id: 1, github_id: 1, username: 'test', access_token: 'gh-token' };
+const BASE_USER = { id: 1, github_id: 1, username: 'test' };
 
 const BASE_REPO = {
   id: 7,
@@ -174,7 +173,6 @@ describe('ClaudeAgentService', (hooks) => {
     [BASE_SESSION_ID] = await db('sessions').insert(BASE_SESSION_DATA);
 
     // Default mocks
-    getAnthropicApiKeyFromUser.mockReturnValue('test-api-key');
     getAgentModelFromUser.mockReturnValue('claude-sonnet-4-5');
     loadBaguetteConfig.mockResolvedValue(null);
 

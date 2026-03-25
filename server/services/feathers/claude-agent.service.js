@@ -9,7 +9,7 @@ import {
 } from '../agent-settings.js';
 import { getModelId } from '../anthropic-models.js';
 import { loadBaguetteConfig } from '../baguette-config.js';
-import { buildClaudeEnvFromUser } from '../session-env.js';
+import { getClaudeEnv } from '../session-env.js';
 import { buildBaguetteMcpServer } from '../baguette-mcp-server.js';
 import { createMessageChannel } from '../message-channel.js';
 import loadPrompt from '../../prompts/loadPrompt.js';
@@ -577,7 +577,7 @@ export class ClaudeAgentService {
     await this._disposeActiveSession(sessionId);
   }
 
-  async generateSessionMetadata(initialPrompt, shortId = '', user) {
+  async generateSessionMetadata(initialPrompt, shortId = '', user, repoFullName = null) {
     const fallbackBranch = `task-${shortId}`;
     const prompt = `Generate metadata for a coding task. Output ONLY a JSON object with no markdown or explanation:
 - "label": very short label (max 50 chars) summarizing the task
@@ -588,7 +588,7 @@ Task: ${initialPrompt}`;
     let label = '';
     let branchName = fallbackBranch;
 
-    const env = buildClaudeEnvFromUser(user);
+    const env = await getClaudeEnv(this.app, user.id, repoFullName);
     for await (const message of query({
       prompt,
       options: { model: getModelId('haiku'), env },

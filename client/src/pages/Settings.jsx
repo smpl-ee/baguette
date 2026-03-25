@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { toastError } from '../utils/toastError.jsx';
 import { apiFetch } from '../api.js';
-import { usersService, reposService } from '../feathers.js';
+import { usersService, reposService, userReposService } from '../feathers.js';
 import { useAuth } from '../hooks/useAuth.jsx';
 import { requestNotificationPermission } from '../utils/notifications.js';
 import { useRepoContext } from '../context/RepoContext.jsx';
@@ -169,6 +169,31 @@ function RepositoriesTab({ settings, onSave }) {
   const [unlinkingId, setUnlinkingId] = useState(null);
   const [confirmUnlink, setConfirmUnlink] = useState(null);
 
+  // Per-repo API key state
+  const [repoKeyEditingId, setRepoKeyEditingId] = useState(null);
+  const [repoKeyValue, setRepoKeyValue] = useState(null);
+  const [repoKeyDirty, setRepoKeyDirty] = useState(false);
+  const [repoKeySaving, setRepoKeySaving] = useState(false);
+  // Local override of anthropic_api_key per repo (after save, until refetch)
+  const [repoKeyOverrides, setRepoKeyOverrides] = useState({});
+
+  const handleRepoKeySave = async (repoId, userRepoId) => {
+    setRepoKeySaving(true);
+    try {
+      const result = await userReposService.patch(userRepoId, {
+        anthropic_api_key: repoKeyValue ?? '',
+      });
+      setRepoKeyOverrides((prev) => ({ ...prev, [repoId]: result.anthropic_api_key }));
+      setRepoKeyEditingId(null);
+      setRepoKeyValue(null);
+      setRepoKeyDirty(false);
+    } catch (err) {
+      toastError('Failed to save API key', err);
+    } finally {
+      setRepoKeySaving(false);
+    }
+  };
+
   const handleAdd = async (e) => {
     e.preventDefault();
     if (!selectedRepo) return;
@@ -332,28 +357,95 @@ function RepositoriesTab({ settings, onSave }) {
           {repos.length === 0 && (
             <p className="text-zinc-600 text-sm text-center py-8">No repositories added</p>
           )}
-          {repos.map((r) => (
-            <div
-              key={r.id}
-              className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 last:border-0 gap-3"
-            >
-              <div className="min-w-0">
-                <code className="text-sm text-white font-medium">{r.full_name}</code>
-                <div className="text-xs text-zinc-500 mt-0.5">
-                  {r.session_count} session(s) · {r.exists_on_fs ? 'On disk' : 'Not on disk'}
+          {repos.map((r) => {
+            const maskedKey =
+              repoKeyOverrides[r.id] !== undefined ? repoKeyOverrides[r.id] : r.anthropic_api_key;
+            const isEditing = repoKeyEditingId === r.id;
+            return (
+              <div key={r.id} className="border-b border-zinc-800 last:border-0">
+                <div className="flex items-center justify-between px-4 py-3 gap-3">
+                  <div className="min-w-0">
+                    <code className="text-sm text-white font-medium">{r.full_name}</code>
+                    <div className="text-xs text-zinc-500 mt-0.5">
+                      {r.session_count} session(s) · {r.exists_on_fs ? 'On disk' : 'Not on disk'}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={() => {
+                        if (isEditing) {
+                          setRepoKeyEditingId(null);
+                          setRepoKeyValue(null);
+                          setRepoKeyDirty(false);
+                        } else {
+                          setRepoKeyEditingId(r.id);
+                          setRepoKeyValue(null);
+                          setRepoKeyDirty(false);
+                        }
+                      }}
+                      className={`text-xs ${maskedKey ? 'text-amber-400 hover:text-amber-300' : 'text-zinc-400 hover:text-zinc-300'}`}
+                    >
+                      {maskedKey ? 'API key ✓' : 'API key'}
+                    </button>
+                    <button
+                      onClick={() => handleUnlinkClick(r)}
+                      disabled={unlinkingId !== null}
+                      className="text-xs text-red-500 hover:text-red-400 disabled:opacity-50"
+                    >
+                      Remove
+                    </button>
+                  </div>
                 </div>
+                {isEditing && (
+                  <div className="px-4 pb-3 space-y-2">
+                    <p className="text-xs text-zinc-400">
+                      Anthropic API key for this repo (overrides your account key)
+                    </p>
+                    <div className="flex gap-2 items-center">
+                      <div className="flex-1">
+                        <MaskedSecretInput
+                          maskedValue={maskedKey}
+                          placeholder="sk-ant-…"
+                          onChange={(val, dirty) => {
+                            setRepoKeyValue(val);
+                            setRepoKeyDirty(dirty);
+                          }}
+                        />
+                      </div>
+                      <button
+                        onClick={() => handleRepoKeySave(r.id, r.user_repo_id)}
+                        disabled={repoKeySaving || !repoKeyDirty}
+                        className="bg-amber-500 hover:bg-amber-400 disabled:bg-zinc-700 text-zinc-950 px-3 py-2 rounded-lg text-xs font-medium transition-colors shrink-0"
+                      >
+                        {repoKeySaving ? 'Saving…' : 'Save'}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setRepoKeyEditingId(null);
+                          setRepoKeyValue(null);
+                          setRepoKeyDirty(false);
+                        }}
+                        className="text-xs text-zinc-400 hover:text-zinc-300 shrink-0"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                    {maskedKey && (
+                      <button
+                        onClick={() => {
+                          setRepoKeyValue('');
+                          setRepoKeyDirty(true);
+                        }}
+                        className="text-xs text-zinc-500 hover:text-zinc-400"
+                      >
+                        Clear key (use account default)
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  onClick={() => handleUnlinkClick(r)}
-                  disabled={unlinkingId !== null}
-                  className="text-xs text-red-500 hover:text-red-400 disabled:opacity-50"
-                >
-                  Remove
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 

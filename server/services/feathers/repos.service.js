@@ -19,7 +19,7 @@ import {
 } from '../github.js';
 import { loadBaguetteConfig } from '../baguette-config.js';
 import loadPrompt from '../../prompts/loadPrompt.js';
-import { requireUser } from './hooks.js';
+import { requireUser, decryptFields } from './hooks.js';
 import { getEffectiveGithubToken } from '../agent-settings.js';
 import { REPOS_DIR, DOCKER_COMPOSE_PATH } from '../../config.js';
 
@@ -43,7 +43,9 @@ class ReposService extends KnexService {
         'repos.stripped_name',
         'repos.bare_path',
         'repos.default_branch',
-        'repos.created_at'
+        'repos.created_at',
+        'user_repos.id as user_repo_id',
+        'user_repos.anthropic_api_key_encrypted'
       )
       .whereNull('repos.deleted_at')
       .orderBy('repos.full_name');
@@ -318,6 +320,9 @@ export const reposHooks = {
   before: {
     all: [requireUser],
   },
+  after: {
+    find: [decryptFields({ anthropic_api_key: 'anthropic_api_key_encrypted' })],
+  },
 };
 
 export function registerReposService(app, path = 'repos') {
@@ -332,7 +337,6 @@ export function registerReposService(app, path = 'repos') {
       'find',
       'get',
       'create',
-      'patch',
       'remove',
       'findRemote',
       'findOrgs',

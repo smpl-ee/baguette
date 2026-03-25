@@ -1,5 +1,4 @@
 import { loadBaguetteConfig, interpolateEnv } from './baguette-config.js';
-import { getAnthropicApiKeyFromUser } from './agent-settings.js';
 import { getPreviewHost } from './preview.js';
 
 const SERVER_ONLY_ENV_KEYS = [
@@ -47,11 +46,10 @@ export async function buildTaskEnv(db, sessionId) {
 }
 
 /**
- * Build Claude subprocess env from a user row (no DB lookup).
- * Used when there is no session id yet (e.g. metadata generation during session create).
+ * Build Claude subprocess env from a pre-decrypted user row.
+ * All fields on `user` must already be plaintext (fetched via Feather service with no provider).
  */
-export function buildClaudeEnvFromUser(user) {
-  const apiKey = getAnthropicApiKeyFromUser(user);
+function buildClaudeEnvFromPlainUser(user, anthropicApiKey) {
   const gitName = user?.username || 'baguette';
   const gitEmail =
     user?.email ||
@@ -60,7 +58,7 @@ export function buildClaudeEnvFromUser(user) {
       : 'baguette@users.noreply.github.com');
   return {
     ...stripServerEnv(process.env),
-    ...(apiKey ? { ANTHROPIC_API_KEY: apiKey } : {}),
+    ...(anthropicApiKey ? { ANTHROPIC_API_KEY: anthropicApiKey } : {}),
     GIT_AUTHOR_NAME: gitName,
     GIT_AUTHOR_EMAIL: gitEmail,
     GIT_COMMITTER_NAME: gitName,
@@ -69,12 +67,50 @@ export function buildClaudeEnvFromUser(user) {
 }
 
 /**
- * Build the environment for the Claude agent subprocess.
- * Includes the Anthropic API key and git author/committer identity
- * derived from the session's owner.
+ * Build the Claude agent subprocess environment for a given user + repo.
+ * Fetches the user and per-repo key via Feather services (hooks decrypt, no raw DB access).
+ * Per-repo key takes priority over the user-level key.
+ *
+ * @param {object} app  - Feathers app instance
+ * @param {number} userId
+ * @param {string|null} repoFullName - e.g. "owner/repo", or null when no repo context
  */
-export async function buildClaudeEnv(db, sessionId) {
+export async function getClaudeEnv(app, userId, repoFullName) {
+  const user = await app.service('users').get(userId, {}); // no provider → plaintext secrets
+
+  let repoApiKey = null;
+  if (repoFullName) {
+    const db = app.get('db');
+    const repo = await db('repos')
+      .where({ full_name: repoFullName })
+      .whereNull('deleted_at')
+      .first();
+    if (repo) {
+      const userRepos = await app.service('user-repos').find({
+        query: { repo_id: repo.id },
+        user: { id: userId }, // internal call — no provider → plaintext
+        paginate: false,
+      });
+      repoApiKey = userRepos?.[0]?.anthropic_api_key || null;
+    }
+  }
+
+  const apiKey = repoApiKey || user.anthropic_api_key || null;
+  return buildClaudeEnvFromPlainUser(user, apiKey);
+}
+
+/**
+ * Convenience wrapper: resolve userId + repoFullName from a session row, then call getClaudeEnv.
+ *
+ * @param {object} app       - Feathers app instance
+ * @param {number} sessionId
+ */
+export async function getClaudeEnvForSession(app, sessionId) {
+  const db = app.get('db');
   const session = await db('sessions').where({ id: sessionId }).first();
-  const user = session ? await db('users').where({ id: session.user_id }).first() : null;
-  return buildClaudeEnvFromUser(user);
+  if (!session) return buildClaudeEnvFromPlainUser(null, null);
+  const repo = session.repo_id
+    ? await db('repos').where({ id: session.repo_id }).first()
+    : null;
+  return getClaudeEnv(app, session.user_id, repo?.full_name ?? null);
 }

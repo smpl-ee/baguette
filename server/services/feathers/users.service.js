@@ -1,13 +1,7 @@
 import { KnexService } from '@feathersjs/knex';
 import { NotAuthenticated } from '@feathersjs/errors';
-import { requireUser } from './hooks.js';
-import { encrypt, decrypt } from '../../lib/encrypt.js';
+import { requireUser, encryptFields, decryptFields } from './hooks.js';
 import { SYSTEM_ALLOWED_COMMANDS } from '../../services/agent-settings.js';
-
-function maskValue(value) {
-  if (!value || value.length <= 6) return '••••••';
-  return value.slice(0, 3) + '•'.repeat(Math.min(value.length - 6, 10)) + value.slice(-3);
-}
 
 /**
  * Users service (table: users). Admin-only. Supports listing, getting,
@@ -35,56 +29,23 @@ async function orderByCreatedAt(context) {
   return context;
 }
 
-function encryptUserSecrets(context) {
-  const { github_token, anthropic_api_key, allowed_commands } = context.data;
-  if (github_token !== undefined) {
-    context.data.github_token_encrypted = github_token ? encrypt(github_token) : null;
-    delete context.data.github_token;
-  }
-  if (anthropic_api_key !== undefined) {
-    context.data.anthropic_api_key_encrypted = anthropic_api_key
-      ? encrypt(anthropic_api_key)
-      : null;
-    delete context.data.anthropic_api_key;
-  }
-  if (allowed_commands !== undefined) {
+function encryptAllowedCommands(context) {
+  if (context.data.allowed_commands !== undefined) {
     context.data.allowed_commands = JSON.stringify(
-      Array.isArray(allowed_commands) ? allowed_commands : []
+      Array.isArray(context.data.allowed_commands) ? context.data.allowed_commands : []
     );
   }
   return context;
 }
 
-function formatUserSecrets(context) {
-  const isExternal = !!context.params.provider;
+// Non-secret fields only visible externally + parsed allowed_commands
+function formatUserExternal(context) {
+  if (!context.params.provider) return context;
   const process = (user) => {
-    if (user.github_token_encrypted) {
-      try {
-        const raw = decrypt(user.github_token_encrypted);
-        user.github_token = isExternal ? maskValue(raw) : raw;
-      } catch {
-        user.github_token = null;
-      }
-    } else {
-      user.github_token = null;
-    }
-    if (user.anthropic_api_key_encrypted) {
-      try {
-        const raw = decrypt(user.anthropic_api_key_encrypted);
-        user.anthropic_api_key = isExternal ? maskValue(raw) : raw;
-      } catch {
-        user.anthropic_api_key = null;
-      }
-    } else {
-      user.anthropic_api_key = null;
-    }
-    delete user.github_token_encrypted;
-    delete user.anthropic_api_key_encrypted;
-    if (isExternal) {
-      delete user.access_token;
-      user.allowed_commands = user.allowed_commands ? JSON.parse(user.allowed_commands) : [];
-      user.system_allowed_commands = SYSTEM_ALLOWED_COMMANDS;
-    }
+    // access_token is always hidden from external callers (even masked)
+    delete user.access_token;
+    user.allowed_commands = user.allowed_commands ? JSON.parse(user.allowed_commands) : [];
+    user.system_allowed_commands = SYSTEM_ALLOWED_COMMANDS;
     return user;
   };
   if (Array.isArray(context.result)) {
@@ -97,7 +58,20 @@ function formatUserSecrets(context) {
   return context;
 }
 
+const encryptUserSecrets = encryptFields({
+  access_token: 'access_token_encrypted',
+  github_token: 'github_token_encrypted',
+  anthropic_api_key: 'anthropic_api_key_encrypted',
+});
+
+const decryptUserSecrets = decryptFields({
+  access_token: 'access_token_encrypted',
+  github_token: 'github_token_encrypted',
+  anthropic_api_key: 'anthropic_api_key_encrypted',
+});
+
 function restrictPatchToSelf(context) {
+  if (!context.params.provider) return context; // internal calls are trusted
   if (String(context.params.user?.id) !== String(context.id)) {
     throw new NotAuthenticated('Can only patch own user');
   }
@@ -108,14 +82,14 @@ export const usersHooks = {
   before: {
     all: [requireUser],
     find: [orderByCreatedAt],
-    create: [encryptUserSecrets],
-    patch: [restrictPatchToSelf, encryptUserSecrets],
+    create: [encryptAllowedCommands, encryptUserSecrets],
+    patch: [restrictPatchToSelf, encryptAllowedCommands, encryptUserSecrets],
   },
   after: {
-    find: [formatUserSecrets],
-    get: [formatUserSecrets],
-    create: [formatUserSecrets],
-    patch: [formatUserSecrets],
+    find: [decryptUserSecrets, formatUserExternal],
+    get: [decryptUserSecrets, formatUserExternal],
+    create: [decryptUserSecrets, formatUserExternal],
+    patch: [decryptUserSecrets, formatUserExternal],
   },
 };
 

@@ -26,8 +26,8 @@ let app;
 beforeEach(async () => {
   // Seed users so DB is not empty (secrets table exists after migrations)
   await db('users').insert([
-    { github_id: 1, username: 'admin', access_token: 'tok1', approved: true },
-    { github_id: 2, username: 'alice', access_token: 'tok2', approved: true },
+    { github_id: 1, username: 'admin', approved: true },
+    { github_id: 2, username: 'alice', approved: true },
   ]);
   app = makeApp(db);
   await app.setup();

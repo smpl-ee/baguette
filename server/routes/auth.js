@@ -4,200 +4,205 @@ import logger from '../logger.js';
 import { signPreviewToken, getPreviewHost } from '../services/preview.js';
 import { GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, PUBLIC_HOST } from '../config.js';
 
-const router = Router();
-
 const GITHUB_AUTH_URL = 'https://github.com/login/oauth/authorize';
 const GITHUB_TOKEN_URL = 'https://github.com/login/oauth/access_token';
 const GITHUB_USER_URL = 'https://api.github.com/user';
 
-if (process.env.NODE_ENV === 'development') {
-  router.get('/auth/dev', async (req, res) => {
+export function createAuthRoutes(app) {
+  const router = Router();
+
+  if (process.env.NODE_ENV === 'development') {
+    router.get('/auth/dev', async (req, res) => {
+      try {
+        const devGhKey = process.env.DEV_USER_GH_KEY || '';
+        let user = await db('users').where({ email: 'dev@baguette.local' }).first();
+        if (!user) {
+          const created = await app.service('users').create(
+            {
+              github_id: 0,
+              username: 'dev',
+              email: 'dev@baguette.local',
+              access_token: devGhKey,
+              approved: true,
+            },
+            {} // internal call — no provider, no user required
+          );
+          user = { id: created.id };
+        } else if (devGhKey) {
+          await app.service('users').patch(user.id, { access_token: devGhKey }, {});
+        }
+
+        res.cookie('userId', String(user.id), {
+          signed: true,
+          httpOnly: true,
+          sameSite: 'lax',
+          maxAge: 30 * 24 * 60 * 60 * 1000,
+        });
+
+        const redirectTo = req.query.redirectTo;
+        const dest =
+          redirectTo && redirectTo.startsWith('/') && !redirectTo.startsWith('//') ? redirectTo : '/';
+        res.redirect(dest);
+      } catch (err) {
+        logger.error(err, 'Dev sign-in error');
+        res.status(500).send('Dev sign-in failed');
+      }
+    });
+  }
+
+  router.get('/auth/github', (req, res) => {
+    if (!GITHUB_CLIENT_ID) return res.status(503).send('GitHub OAuth not configured');
+
+    const { redirectTo } = req.query;
+    if (redirectTo && redirectTo.startsWith('/') && !redirectTo.startsWith('//')) {
+      res.cookie('auth_redirect', redirectTo, {
+        httpOnly: true,
+        sameSite: 'lax',
+        maxAge: 10 * 60 * 1000,
+      });
+    }
+
+    const params = new URLSearchParams({
+      client_id: GITHUB_CLIENT_ID,
+      scope: 'repo read:user user:email workflow',
+      redirect_uri: new URL('/auth/github/callback', PUBLIC_HOST).toString(),
+    });
+    res.redirect(`${GITHUB_AUTH_URL}?${params}`);
+  });
+
+  router.get('/auth/github/callback', async (req, res) => {
+    if (!GITHUB_CLIENT_ID || !GITHUB_CLIENT_SECRET)
+      return res.status(503).send('GitHub OAuth not configured');
+    const { code } = req.query;
+    if (!code) return res.status(400).send('Missing code');
+
     try {
-      const devGhKey = process.env.DEV_USER_GH_KEY || '';
-      let user = await db('users').where({ email: 'dev@baguette.local' }).first();
-      if (!user) {
-        const [inserted] = await db('users')
-          .insert({
-            github_id: 0,
-            username: 'dev',
-            email: 'dev@baguette.local',
-            access_token: devGhKey,
-            approved: true,
-          })
-          .returning('id');
-        user = { id: typeof inserted === 'object' ? inserted.id : inserted };
-      } else if (devGhKey && user.access_token !== devGhKey) {
-        await db('users').where({ id: user.id }).update({ access_token: devGhKey });
+      const tokenRes = await fetch(GITHUB_TOKEN_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          client_id: GITHUB_CLIENT_ID,
+          client_secret: GITHUB_CLIENT_SECRET,
+          code,
+        }),
+      });
+      const tokenData = await tokenRes.json();
+      if (tokenData.error) {
+        return res.status(400).json({ error: tokenData.error_description });
       }
 
-      res.cookie('userId', String(user.id), {
+      const accessToken = tokenData.access_token;
+
+      const userRes = await fetch(GITHUB_USER_URL, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const ghUser = await userRes.json();
+
+      const existing = await db('users').where({ github_id: ghUser.id }).first();
+      let userId;
+
+      if (existing) {
+        await app.service('users').patch(
+          existing.id,
+          {
+            username: ghUser.login,
+            avatar_url: ghUser.avatar_url,
+            access_token: accessToken,
+            ...(ghUser.email ? { email: ghUser.email } : {}),
+          },
+          {} // internal call
+        );
+        userId = existing.id;
+      } else {
+        const userCount = await db('users').count('* as count').first();
+        const isFirstUser = userCount.count === 0;
+
+        const created = await app.service('users').create(
+          {
+            github_id: ghUser.id,
+            username: ghUser.login,
+            avatar_url: ghUser.avatar_url,
+            email: ghUser.email || null,
+            access_token: accessToken,
+            approved: isFirstUser,
+          },
+          {} // internal call
+        );
+        userId = created.id;
+      }
+
+      res.cookie('userId', String(userId), {
         signed: true,
         httpOnly: true,
         sameSite: 'lax',
         maxAge: 30 * 24 * 60 * 60 * 1000,
       });
 
-      const redirectTo = req.query.redirectTo;
+      const redirectTo = req.cookies?.auth_redirect;
+      res.clearCookie('auth_redirect');
       const dest =
         redirectTo && redirectTo.startsWith('/') && !redirectTo.startsWith('//') ? redirectTo : '/';
       res.redirect(dest);
     } catch (err) {
-      logger.error(err, 'Dev sign-in error');
-      res.status(500).send('Dev sign-in failed');
+      logger.error(err, 'OAuth error');
+      res.status(500).send('Authentication failed');
     }
   });
-}
 
-router.get('/auth/github', (req, res) => {
-  if (!GITHUB_CLIENT_ID) return res.status(503).send('GitHub OAuth not configured');
+  router.get('/auth/me', async (req, res) => {
+    const userId = req.signedCookies?.userId;
+    if (!userId) return res.json({ user: null });
 
-  const { redirectTo } = req.query;
-  if (redirectTo && redirectTo.startsWith('/') && !redirectTo.startsWith('//')) {
-    res.cookie('auth_redirect', redirectTo, {
-      httpOnly: true,
-      sameSite: 'lax',
-      maxAge: 10 * 60 * 1000,
-    });
-  }
+    const user = await db('users').where({ id: userId }).first();
+    if (!user) return res.json({ user: null });
 
-  const params = new URLSearchParams({
-    client_id: GITHUB_CLIENT_ID,
-    scope: 'repo read:user user:email workflow',
-    redirect_uri: new URL('/auth/github/callback', PUBLIC_HOST).toString(),
-  });
-  res.redirect(`${GITHUB_AUTH_URL}?${params}`);
-});
-
-router.get('/auth/github/callback', async (req, res) => {
-  if (!GITHUB_CLIENT_ID || !GITHUB_CLIENT_SECRET)
-    return res.status(503).send('GitHub OAuth not configured');
-  const { code } = req.query;
-  if (!code) return res.status(400).send('Missing code');
-
-  try {
-    const tokenRes = await fetch(GITHUB_TOKEN_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
+    res.json({
+      user: {
+        id: user.id,
+        username: user.username,
+        avatar_url: user.avatar_url,
+        approved: !!user.approved,
+        builder_modal_mode: !!user.builder_modal_mode,
+        reviewer_modal_mode: !!user.reviewer_modal_mode,
       },
-      body: JSON.stringify({
-        client_id: GITHUB_CLIENT_ID,
-        client_secret: GITHUB_CLIENT_SECRET,
-        code,
-      }),
     });
-    const tokenData = await tokenRes.json();
-    if (tokenData.error) {
-      return res.status(400).json({ error: tokenData.error_description });
-    }
-
-    const accessToken = tokenData.access_token;
-
-    const userRes = await fetch(GITHUB_USER_URL, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    const ghUser = await userRes.json();
-
-    const existing = await db('users').where({ github_id: ghUser.id }).first();
-    let userId;
-
-    if (existing) {
-      await db('users')
-        .where({ id: existing.id })
-        .update({
-          username: ghUser.login,
-          avatar_url: ghUser.avatar_url,
-          access_token: accessToken,
-          ...(ghUser.email ? { email: ghUser.email } : {}),
-        });
-      userId = existing.id;
-    } else {
-      const userCount = await db('users').count('* as count').first();
-      const isFirstUser = userCount.count === 0;
-
-      const [inserted] = await db('users')
-        .insert({
-          github_id: ghUser.id,
-          username: ghUser.login,
-          avatar_url: ghUser.avatar_url,
-          email: ghUser.email || null,
-          access_token: accessToken,
-          approved: isFirstUser,
-        })
-        .returning('id');
-
-      userId = typeof inserted === 'object' ? inserted.id : inserted;
-    }
-
-    res.cookie('userId', String(userId), {
-      signed: true,
-      httpOnly: true,
-      sameSite: 'lax',
-      maxAge: 30 * 24 * 60 * 60 * 1000,
-    });
-
-    const redirectTo = req.cookies?.auth_redirect;
-    res.clearCookie('auth_redirect');
-    const dest =
-      redirectTo && redirectTo.startsWith('/') && !redirectTo.startsWith('//') ? redirectTo : '/';
-    res.redirect(dest);
-  } catch (err) {
-    logger.error(err, 'OAuth error');
-    res.status(500).send('Authentication failed');
-  }
-});
-
-router.get('/auth/me', async (req, res) => {
-  const userId = req.signedCookies?.userId;
-  if (!userId) return res.json({ user: null });
-
-  const user = await db('users').where({ id: userId }).first();
-  if (!user) return res.json({ user: null });
-
-  res.json({
-    user: {
-      id: user.id,
-      username: user.username,
-      avatar_url: user.avatar_url,
-      approved: !!user.approved,
-      builder_modal_mode: !!user.builder_modal_mode,
-      reviewer_modal_mode: !!user.reviewer_modal_mode,
-    },
   });
-});
 
-// Returns the signed preview redirect URL as JSON.
-// Browser navigations (Accept: text/html) fall through to the SPA which renders SessionPreview.
-router.get('/auth/preview', async (req, res, _next) => {
-  const userId = req.signedCookies?.userId;
-  const { session: shortId } = req.query;
+  // Returns the signed preview redirect URL as JSON.
+  // Browser navigations (Accept: text/html) fall through to the SPA which renders SessionPreview.
+  router.get('/auth/preview', async (req, res, _next) => {
+    const userId = req.signedCookies?.userId;
+    const { session: shortId } = req.query;
 
-  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-  if (!shortId) return res.status(400).json({ error: 'Missing session parameter' });
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    if (!shortId) return res.status(400).json({ error: 'Missing session parameter' });
 
-  const session = await db('sessions')
-    .where({ short_id: shortId })
-    .whereNull('archived_at')
-    .first();
-  if (!session) return res.status(404).json({ error: 'Session not found' });
-  if (String(session.user_id) !== String(userId))
-    return res.status(403).json({ error: 'Forbidden' });
+    const session = await db('sessions')
+      .where({ short_id: shortId })
+      .whereNull('archived_at')
+      .first();
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+    if (String(session.user_id) !== String(userId))
+      return res.status(403).json({ error: 'Forbidden' });
 
-  const token = signPreviewToken(shortId);
-  const url = new URL('/_baguette/auth', getPreviewHost(shortId));
-  url.searchParams.set('sign', token);
+    const token = signPreviewToken(shortId);
+    const url = new URL('/_baguette/auth', getPreviewHost(shortId));
+    url.searchParams.set('sign', token);
 
-  if (req.get('Accept') !== 'application/json') {
-    return res.redirect(url.toString());
-  } else {
-    return res.json({ url: url.toString() });
-  }
-});
+    if (req.get('Accept') !== 'application/json') {
+      return res.redirect(url.toString());
+    } else {
+      return res.json({ url: url.toString() });
+    }
+  });
 
-router.post('/auth/logout', (req, res) => {
-  res.clearCookie('userId');
-  res.json({ ok: true });
-});
+  router.post('/auth/logout', (req, res) => {
+    res.clearCookie('userId');
+    res.json({ ok: true });
+  });
 
-export default router;
+  return router;
+}

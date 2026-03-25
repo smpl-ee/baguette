@@ -19,7 +19,7 @@ import logger from '../../logger.js';
 import { requireUser, scopeByUser } from './hooks.js';
 import { PUBLIC_HOST, DATA_DIR, resolveDataDirRelativePath } from '../../config.js';
 import path from 'path';
-import { buildTaskEnv, buildClaudeEnv } from '../session-env.js';
+import { buildTaskEnv, getClaudeEnvForSession } from '../session-env.js';
 import { getEffectiveGithubToken } from '../agent-settings.js';
 
 function getPreviewAuthUri(shortId) {
@@ -75,7 +75,7 @@ export class SessionsService extends KnexService {
   }
 
   async getClaudeEnv(sessionId) {
-    return buildClaudeEnv(this.app.get('db'), sessionId);
+    return getClaudeEnvForSession(this.app, sessionId);
   }
 
   async removeByRepoId(repoId, params) {
@@ -425,7 +425,7 @@ async function prepareSessionEnvironment(context) {
     try {
       const result = await context.app
         .service('claude-agent')
-        .generateSessionMetadata(context.data.initial_prompt || '', shortId, context.params.user);
+        .generateSessionMetadata(context.data.initial_prompt || '', shortId, context.params.user, repo.full_name);
       if (result.label) context.data.label = result.label;
       branchName = result.branchName ? `${branchPrefix}${result.branchName}` : fallbackBranch;
     } catch (err) {

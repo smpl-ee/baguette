@@ -77,8 +77,8 @@ beforeEach(async () => {
   vi.clearAllMocks();
 
   await db('users').insert([
-    { github_id: 1, username: 'admin', access_token: 'tok1', approved: true },
-    { github_id: 2, username: 'alice', access_token: 'tok2', approved: true },
+    { github_id: 1, username: 'admin', approved: true },
+    { github_id: 2, username: 'alice', approved: true },
   ]);
   const admin = await db('users').where({ username: 'admin' }).first();
   const alice = await db('users').where({ username: 'alice' }).first();
@@ -197,6 +197,56 @@ describe('Repos service - find', () => {
 
   it('unauthenticated find is rejected', async () => {
     await expect(app.service('repos').find(unauthParams)).rejects.toThrow('Not authenticated');
+  });
+
+  it('returns anthropic_api_key: null when not set on user_repos', async () => {
+    const [repoId] = await db('repos').insert({
+      full_name: 'alice/nokey',
+      stripped_name: 'alice-nokey',
+      bare_path: '/nonexistent',
+    });
+    await linkAliceToRepo(repoId);
+    const result = await app.service('repos').find(params(regularUser));
+    const repo = result.find((r) => r.full_name === 'alice/nokey');
+    expect(repo.anthropic_api_key).toBeNull();
+    expect(repo.anthropic_api_key_encrypted).toBeUndefined();
+  });
+
+  it('returns masked anthropic_api_key for external callers when key is set', async () => {
+    const { encrypt } = await import('../../lib/encrypt.js');
+    const [repoId] = await db('repos').insert({
+      full_name: 'alice/withkey',
+      stripped_name: 'alice-withkey',
+      bare_path: '/nonexistent',
+    });
+    await db('user_repos').insert({
+      user_id: regularUser.id,
+      repo_id: repoId,
+      anthropic_api_key_encrypted: encrypt('sk-ant-secretkey123'),
+    });
+    const result = await app.service('repos').find(params(regularUser));
+    const repo = result.find((r) => r.full_name === 'alice/withkey');
+    expect(repo.anthropic_api_key).toBeTruthy();
+    expect(repo.anthropic_api_key).not.toBe('sk-ant-secretkey123');
+    expect(repo.anthropic_api_key_encrypted).toBeUndefined();
+    expect(repo.user_repo_id).toBeTruthy();
+  });
+
+  it('returns plaintext anthropic_api_key for internal callers (no provider)', async () => {
+    const { encrypt } = await import('../../lib/encrypt.js');
+    const [repoId] = await db('repos').insert({
+      full_name: 'alice/withkey2',
+      stripped_name: 'alice-withkey2',
+      bare_path: '/nonexistent',
+    });
+    await db('user_repos').insert({
+      user_id: regularUser.id,
+      repo_id: repoId,
+      anthropic_api_key_encrypted: encrypt('sk-ant-plaintext456'),
+    });
+    const result = await app.service('repos').find({ user: regularUser }); // no provider
+    const repo = result.find((r) => r.full_name === 'alice/withkey2');
+    expect(repo.anthropic_api_key).toBe('sk-ant-plaintext456');
   });
 });
 

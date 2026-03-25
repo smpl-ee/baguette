@@ -1,5 +1,3 @@
-import { decrypt } from '../lib/encrypt.js';
-
 export const SYSTEM_ALLOWED_COMMANDS = [
   'git commit',
   'git add',
@@ -41,27 +39,9 @@ export function getAllowedCommandsFromUser(user) {
   return [...SYSTEM_ALLOWED_COMMANDS, ...userCmds];
 }
 
-// Use PAT if set (plain or encrypted), otherwise fall back to OAuth access_token
+// Use PAT if set, otherwise fall back to OAuth access_token.
+// Expects a user that has been fetched via the Feather service (plaintext secrets, no _encrypted fields).
 export function getEffectiveGithubToken(user) {
-  if (user?.github_token) return user.github_token; // plain (hook-processed)
-  if (user?.github_token_encrypted) {
-    try {
-      return decrypt(user.github_token_encrypted);
-    } catch {
-      /* ignore */
-    }
-  }
-  return user?.access_token || null;
+  return user?.github_token || user?.access_token || null;
 }
 
-export function getAnthropicApiKeyFromUser(user) {
-  if (user?.anthropic_api_key) return user.anthropic_api_key; // plain (hook-processed)
-  if (user?.anthropic_api_key_encrypted) {
-    try {
-      return decrypt(user.anthropic_api_key_encrypted);
-    } catch {
-      return null;
-    }
-  }
-  return null;
-}

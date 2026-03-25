@@ -26,9 +26,9 @@ let pendingUser;
 
 beforeEach(async () => {
   await db('users').insert([
-    { github_id: 1, username: 'alice', access_token: 'tok1', approved: true },
-    { github_id: 2, username: 'bob', access_token: 'tok2', approved: true },
-    { github_id: 3, username: 'charlie', access_token: 'tok3', approved: false },
+    { github_id: 1, username: 'alice', approved: true },
+    { github_id: 2, username: 'bob', approved: true },
+    { github_id: 3, username: 'charlie', approved: false },
   ]);
   user1 = await db('users').where({ username: 'alice' }).first();
   user2 = await db('users').where({ username: 'bob' }).first();
@@ -106,10 +106,7 @@ describe('Users service - create', () => {
   it('any authenticated user can create a new user', async () => {
     const result = await app
       .service('users')
-      .create(
-        { github_id: 999, username: 'newuser', access_token: 'tok_new', approved: false },
-        params(user1)
-      );
+      .create({ github_id: 999, username: 'newuser', approved: false }, params(user1));
     expect(result.username).toBe('newuser');
     const row = await db('users').where({ username: 'newuser' }).first();
     expect(row).toBeTruthy();
@@ -117,9 +114,7 @@ describe('Users service - create', () => {
 
   it('unauthenticated create is rejected', async () => {
     await expect(
-      app
-        .service('users')
-        .create({ github_id: 999, username: 'newuser', access_token: 'tok_new' }, unauthParams)
+      app.service('users').create({ github_id: 999, username: 'newuser' }, unauthParams)
     ).rejects.toThrow('Not authenticated');
   });
 });
@@ -165,6 +160,56 @@ describe('Users service - patch', () => {
     const result = await app.service('users').get(user1.id, { user: user1 }); // no provider = internal
     expect(result.github_token).toBe('ghp_testtoken123');
     expect(result.github_token_encrypted).toBeUndefined();
+  });
+
+  it('encrypts anthropic_api_key on patch', async () => {
+    await app
+      .service('users')
+      .patch(user1.id, { anthropic_api_key: 'sk-ant-test123' }, params(user1));
+    const row = await db('users').where({ id: user1.id }).first();
+    expect(row.anthropic_api_key_encrypted).toBeTruthy();
+    expect(row.anthropic_api_key_encrypted).not.toBe('sk-ant-test123');
+  });
+
+  it('returns masked anthropic_api_key for external calls', async () => {
+    await app
+      .service('users')
+      .patch(user1.id, { anthropic_api_key: 'sk-ant-test123456' }, params(user1));
+    const result = await app.service('users').get(user1.id, params(user1));
+    expect(result.anthropic_api_key).toBeTruthy();
+    expect(result.anthropic_api_key).not.toBe('sk-ant-test123456');
+    expect(result.anthropic_api_key_encrypted).toBeUndefined();
+  });
+
+  it('returns plaintext anthropic_api_key for internal calls (no provider)', async () => {
+    await app
+      .service('users')
+      .patch(user1.id, { anthropic_api_key: 'sk-ant-test123456' }, params(user1));
+    const result = await app.service('users').get(user1.id, { user: user1 });
+    expect(result.anthropic_api_key).toBe('sk-ant-test123456');
+    expect(result.anthropic_api_key_encrypted).toBeUndefined();
+  });
+
+  it('encrypts access_token on patch', async () => {
+    await app.service('users').patch(user1.id, { access_token: 'gho_testtoken' }, params(user1));
+    const row = await db('users').where({ id: user1.id }).first();
+    expect(row.access_token_encrypted).toBeTruthy();
+    expect(row.access_token_encrypted).not.toBe('gho_testtoken');
+    expect(row.access_token).toBeUndefined();
+  });
+
+  it('hides access_token from external callers', async () => {
+    await app.service('users').patch(user1.id, { access_token: 'gho_testtoken' }, params(user1));
+    const result = await app.service('users').get(user1.id, params(user1));
+    expect(result.access_token).toBeUndefined();
+    expect(result.access_token_encrypted).toBeUndefined();
+  });
+
+  it('returns plaintext access_token for internal calls (no provider)', async () => {
+    await app.service('users').patch(user1.id, { access_token: 'gho_testtoken' }, params(user1));
+    const result = await app.service('users').get(user1.id, { user: user1 });
+    expect(result.access_token).toBe('gho_testtoken');
+    expect(result.access_token_encrypted).toBeUndefined();
   });
 });
 

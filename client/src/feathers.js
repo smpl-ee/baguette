@@ -14,6 +14,7 @@ export const messagesService = app.service('messages');
 export const tasksService = app.service('tasks');
 tasksService.methods('kill', 'logs');
 export const reposService = app.service('repos');
+export const userReposService = app.service('user-repos');
 reposService.methods(
   'findRemote',
   'findOrgs',

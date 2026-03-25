@@ -89,7 +89,7 @@ function makeApp(db) {
 }
 
 async function seedUserAndSession(db, { github_id, username, shortId, worktreePath = null } = {}) {
-  await db('users').insert({ github_id, username, access_token: 'token', approved: true });
+  await db('users').insert({ github_id, username, approved: true });
   const user = await db('users').where({ username }).first();
 
   await db('repos')
@@ -141,7 +141,6 @@ describe('Sessions service - custom methods', (hooks) => {
     await db('users').insert({
       github_id: 1002,
       username: 'bob',
-      access_token: 'token2',
       approved: true,
     });
     otherUserId = (await db('users').where({ username: 'bob' }).first()).id;
@@ -338,8 +337,8 @@ describe('Sessions service - find, get, create', (hooks) => {
     vi.clearAllMocks();
 
     await db('users').insert([
-      { github_id: 1001, username: 'alice', access_token: 'token1', approved: true },
-      { github_id: 1002, username: 'bob', access_token: 'token2', approved: true },
+      { github_id: 1001, username: 'alice', approved: true },
+      { github_id: 1002, username: 'bob', approved: true },
     ]);
     userId1 = (await db('users').where({ username: 'alice' }).first()).id;
     userId2 = (await db('users').where({ username: 'bob' }).first()).id;
@@ -394,7 +393,6 @@ describe('Sessions service - find, get, create', (hooks) => {
       await db('users').insert({
         github_id: 1003,
         username: 'carol',
-        access_token: 'token3',
         approved: true,
       });
       const carol = await db('users').where({ username: 'carol' }).first();

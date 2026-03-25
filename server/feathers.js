@@ -3,68 +3,56 @@ import express from '@feathersjs/express';
 import socketio from '@feathersjs/socketio';
 import cookie from 'cookie';
 import { unsign } from 'cookie-signature';
-import db from './db.js';
 import { ENCRYPTION_KEY } from './config.js';
 
 /**
  * Cookie-based auth: set req.user and req.feathers.user for REST,
  * and socket.feathers.user for Socket.io. Uses signed userId cookie.
+ * Fetches the user via the Feathers service so hooks run (secrets are decrypted, not raw).
  */
-export function cookieAuthMiddleware(req, res, next) {
-  const userId = req.signedCookies?.userId;
-  req.feathers = req.feathers || {};
-  if (!userId) {
-    return next();
-  }
-  db('users')
-    .where({ id: userId })
-    .first()
-    .then((user) => {
-      if (!user || !user.approved) {
-        return next();
-      }
+export function cookieAuthMiddleware(app) {
+  return async (req, res, next) => {
+    const userId = req.signedCookies?.userId;
+    req.feathers = req.feathers || {};
+    if (!userId) return next();
+    try {
+      const user = await app.service('users').get(userId, {}); // no provider → plaintext secrets
+      if (!user?.approved) return next();
       req.user = user;
       req.feathers.user = user;
       next();
-    })
-    .catch(next);
+    } catch {
+      next();
+    }
+  };
 }
 
 /**
  * Socket.io middleware: parse cookie from handshake, load user, set socket.feathers.user.
- * Same logic as ws.js upgrade (signed cookie -> userId -> user from DB, must be approved).
+ * Same logic as cookieAuthMiddleware — uses Feather service so secrets are plaintext.
  */
-export function cookieAuthSocketMiddleware(socket, next) {
-  const rawCookie = socket.handshake?.headers?.cookie;
-  socket.feathers = socket.feathers || {};
-  if (!rawCookie) {
-    return next();
-  }
-  const cookies = cookie.parse(rawCookie);
-  const signed = cookies['userId'];
-  if (!signed) {
-    return next();
-  }
-  const prefix = 's:';
-  if (!signed.startsWith(prefix)) {
-    return next();
-  }
-  const userId = unsign(signed.slice(prefix.length), ENCRYPTION_KEY);
-  if (userId === false) {
-    return next();
-  }
-  db('users')
-    .where({ id: userId })
-    .first()
-    .then((user) => {
-      if (!user || !user.approved) {
-        return next();
-      }
+export function cookieAuthSocketMiddleware(app) {
+  return async (socket, next) => {
+    const rawCookie = socket.handshake?.headers?.cookie;
+    socket.feathers = socket.feathers || {};
+    if (!rawCookie) return next();
+    const cookies = cookie.parse(rawCookie);
+    const signed = cookies['userId'];
+    if (!signed) return next();
+    const prefix = 's:';
+    if (!signed.startsWith(prefix)) return next();
+    const userId = unsign(signed.slice(prefix.length), ENCRYPTION_KEY);
+    if (userId === false) return next();
+    try {
+      const user = await app.service('users').get(userId, {}); // no provider → plaintext secrets
+      if (!user?.approved) return next();
       socket.feathers.user = user;
-      socket.feathers._socket = socket; // raw Socket.io socket for emitting custom events
+      socket.feathers._socket = socket;
       next();
-    })
-    .catch(next);
+    } catch {
+      next();
+    }
+  };
 }
 
 /**
@@ -97,7 +85,7 @@ export function createFeathersApp() {
   app.configure(
     socketio({ path: SOCKET_PATH, maxHttpBufferSize: 50e6 }, (io) => {
       io.use((socket, next) => {
-        cookieAuthSocketMiddleware(socket, next);
+        cookieAuthSocketMiddleware(app)(socket, next);
       });
     })
   );
