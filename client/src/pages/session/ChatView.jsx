@@ -6,6 +6,7 @@ import {
   CircleCheck,
   MessageSquare,
   GitCompare,
+  RotateCcw,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { messagesService, sessionsService } from '../../feathers.js';
@@ -208,6 +209,21 @@ export default function ChatView({
               sessionId={session.id}
             />
           ))}
+          {!readonly &&
+            messages.at(-1)?.type === 'system' &&
+            messages.at(-1)?.subtype === 'status' &&
+            messages.at(-1)?.status === 'Server restarted — session was stopped' && (
+              <div className="flex gap-2 flex-wrap py-2">
+                <button
+                  type="button"
+                  onClick={() => handleQuickSend('continue')}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-xs text-zinc-300 transition-colors"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  Continue
+                </button>
+              </div>
+            )}
           {inlineApproval && (
             <ApprovalInline
               request={inlineApproval}
