@@ -122,6 +122,21 @@ describe('UserRepos service - patch (encrypt + mask)', () => {
       app.service('user-repos').patch(userRepo1.id, { anthropic_api_key: 'x' }, { provider: 'rest' })
     ).rejects.toThrow('Not authenticated');
   });
+
+  it('patch succeeds when the user has multiple linked repos (params.knex + post-patch find)', async () => {
+    const [repo2Id] = await db('repos').insert({
+      full_name: 'alice/other',
+      stripped_name: 'alice-other',
+      bare_path: '/nonexistent2',
+    });
+    await db('user_repos').insert({ user_id: user1.id, repo_id: repo2Id });
+
+    const result = await app
+      .service('user-repos')
+      .patch(userRepo1.id, { anthropic_api_key: 'sk-ant-multi' }, params(user1));
+    expect(result.id).toBe(userRepo1.id);
+    expect(result.anthropic_api_key).toBeTruthy();
+  });
 });
 
 describe('UserRepos service - get', () => {

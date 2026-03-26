@@ -169,7 +169,7 @@ function RepositoriesTab({ settings, onSave }) {
   const [unlinkingId, setUnlinkingId] = useState(null);
   const [confirmUnlink, setConfirmUnlink] = useState(null);
 
-  // Per-repo API key state
+  // Per-repo Anthropic key state
   const [repoKeyEditingId, setRepoKeyEditingId] = useState(null);
   const [repoKeyValue, setRepoKeyValue] = useState(null);
   const [repoKeyDirty, setRepoKeyDirty] = useState(false);
@@ -188,7 +188,7 @@ function RepositoriesTab({ settings, onSave }) {
       setRepoKeyValue(null);
       setRepoKeyDirty(false);
     } catch (err) {
-      toastError('Failed to save API key', err);
+      toastError('Failed to save Anthropic Key', err);
     } finally {
       setRepoKeySaving(false);
     }
@@ -385,7 +385,7 @@ function RepositoriesTab({ settings, onSave }) {
                       }}
                       className={`text-xs ${maskedKey ? 'text-amber-400 hover:text-amber-300' : 'text-zinc-400 hover:text-zinc-300'}`}
                     >
-                      {maskedKey ? 'API key ✓' : 'API key'}
+                      {maskedKey ? 'Anthropic Key ✓' : 'Anthropic Key'}
                     </button>
                     <button
                       onClick={() => handleUnlinkClick(r)}
@@ -399,7 +399,7 @@ function RepositoriesTab({ settings, onSave }) {
                 {isEditing && (
                   <div className="px-4 pb-3 space-y-2">
                     <p className="text-xs text-zinc-400">
-                      Anthropic API key for this repo (overrides your account key)
+                      Anthropic Key for this repo (overrides your account key)
                     </p>
                     <div className="flex gap-2 items-center">
                       <div className="flex-1">
@@ -870,7 +870,7 @@ function AgentTab({ settings, onSave }) {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-zinc-300 mb-1">Anthropic API key</label>
+          <label className="block text-sm font-medium text-zinc-300 mb-1">Anthropic Key</label>
           <MaskedSecretInput
             maskedValue={settings?.anthropic_api_key}
             placeholder="sk-ant-…"

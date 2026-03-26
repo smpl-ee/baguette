@@ -1,14 +1,31 @@
 import { KnexService } from '@feathersjs/knex';
+import { NotFound } from '@feathersjs/errors';
 import { requireUser, scopeByUser, encryptFields, decryptFields } from './hooks.js';
 
 const USER_REPO_SECRETS = { anthropic_api_key: 'anthropic_api_key_encrypted' };
 
 class UserReposService extends KnexService {}
 
+/**
+ * scopeByUser sets params.knex; @feathersjs/knex _patch then re-fetches with id $in but
+ * _find ignores params.query when params.knex is set, so the post-patch find returns
+ * all user_repos for the user (or wrong count) and throws NotFound. Same pattern as
+ * requireOwnSession in sessions.service.js — verify ownership, then clear knex.
+ */
+async function requireOwnUserRepo(context) {
+  if (context.method !== 'patch' || context.id == null) return context;
+  const db = context.app.get('db');
+  const userId = context.params.user?.id;
+  const row = await db('user_repos').where({ id: context.id, user_id: userId }).first();
+  if (!row) throw new NotFound('User repository link not found');
+  delete context.params.knex;
+  return context;
+}
+
 export const userReposHooks = {
   before: {
     all: [requireUser, scopeByUser],
-    patch: [encryptFields(USER_REPO_SECRETS)],
+    patch: [requireOwnUserRepo, encryptFields(USER_REPO_SECRETS)],
   },
   after: {
     find: [decryptFields(USER_REPO_SECRETS)],
