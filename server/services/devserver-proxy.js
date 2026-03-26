@@ -5,6 +5,7 @@ import { unsign } from 'cookie-signature';
 import logger from '../logger.js';
 import { extractSessionIdFromHost, verifyPreviewToken } from './preview.js';
 import { PUBLIC_HOST, ENCRYPTION_KEY } from '../config.js';
+import { loadBaguetteConfig } from './baguette-config.js';
 
 const PREVIEW_COOKIE_TTL = 60 * 60 * 1000; // 1 hour
 
@@ -168,7 +169,11 @@ export class DevserverProxy {
     this.devservers.delete(sessionId);
   }
 
-  handlePreviewUpgrade(req, socket, session) {
+  /**
+   * Proxy WebSocket upgrade to the session dev server (same host + cookie rules as HTTP).
+   * Uses http.request so the 101 handshake is forwarded correctly (no duplicate Host lines).
+   */
+  async handlePreviewUpgrade(req, socket, head, session) {
     const cookies = cookie.parse(req.headers.cookie || '');
     const signed = cookies['baguette_preview'] || '';
     const shortId = signed.startsWith('s:') ? unsign(signed.slice(2), ENCRYPTION_KEY) : false;
@@ -177,24 +182,100 @@ export class DevserverProxy {
       return;
     }
 
-    const state = this.devservers.get(session.id);
-    if (!state || state.status !== 'listening') {
+    const baguetteConfig = await loadBaguetteConfig(session.worktree_path);
+    if (!baguetteConfig?.webserver) {
       socket.destroy();
       return;
     }
 
-    const proxySocket = net.connect(state.port, '127.0.0.1', () => {
-      proxySocket.write(
-        `GET ${req.url} HTTP/1.1\r\nHost: localhost:${state.port}\r\n` +
-          Object.entries(req.headers)
-            .map(([k, v]) => `${k}: ${v}`)
-            .join('\r\n') +
-          '\r\n\r\n'
-      );
-      socket.pipe(proxySocket);
-      proxySocket.pipe(socket);
+    const webserverConfig = baguetteConfig.webserver;
+    const sessionId = session.id;
+
+    let state = this.devservers.get(sessionId);
+
+    if (state?.task != null) {
+      const liveTask = this.app.service('tasks').getTask(state.task.id);
+      if (!liveTask || liveTask.status === 'exited') {
+        this._cleanup(sessionId, state);
+        state = null;
+      }
+    }
+
+    if (!state) {
+      state = await this.startDevserver(session, webserverConfig);
+    }
+
+    const ok = await this._waitUntilListeningOrTerminal(state, STARTUP_TIMEOUT_MS);
+    if (!ok || state.status !== 'listening') {
+      socket.destroy();
+      return;
+    }
+
+    this._resetIdleTimer(sessionId, state);
+    this._proxyUpgrade(req, socket, head, state.port);
+  }
+
+  _waitUntilListeningOrTerminal(state, timeoutMs) {
+    const start = Date.now();
+    return new Promise((resolve) => {
+      const tick = () => {
+        if (state.status === 'listening') {
+          resolve(true);
+          return;
+        }
+        if (state.status === 'timedout' || state.status === 'crashed') {
+          resolve(false);
+          return;
+        }
+        if (Date.now() - start > timeoutMs) {
+          resolve(false);
+          return;
+        }
+        setTimeout(tick, POLL_INTERVAL_MS);
+      };
+      tick();
     });
-    proxySocket.on('error', () => socket.destroy());
+  }
+
+  _proxyUpgrade(req, socket, head, port) {
+    const headers = { ...req.headers };
+    const proxyReq = http.request(
+      {
+        agent: false,
+        hostname: '127.0.0.1',
+        port,
+        path: req.url,
+        method: req.method,
+        headers,
+      },
+      (proxyRes) => {
+        if (proxyRes.statusCode !== 101) {
+          socket.destroy();
+        }
+      }
+    );
+
+    proxyReq.on('upgrade', (proxyRes, proxySocket, proxyHead) => {
+      const lines = [`HTTP/1.1 ${proxyRes.statusCode} ${proxyRes.statusMessage || ''}`];
+      for (const [key, value] of Object.entries(proxyRes.headers)) {
+        if (value === undefined) continue;
+        if (Array.isArray(value)) {
+          for (const v of value) lines.push(`${key}: ${v}`);
+        } else {
+          lines.push(`${key}: ${value}`);
+        }
+      }
+      socket.write(lines.join('\r\n') + '\r\n\r\n');
+      if (proxyHead?.length) socket.write(proxyHead);
+      if (head?.length) proxySocket.write(head);
+      proxySocket.pipe(socket);
+      socket.pipe(proxySocket);
+      proxySocket.on('error', () => socket.destroy());
+      socket.on('error', () => proxySocket.destroy());
+    });
+
+    proxyReq.on('error', () => socket.destroy());
+    proxyReq.end();
   }
 
   async handleRequest(req, res, session, baguetteConfig) {

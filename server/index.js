@@ -8,8 +8,13 @@ import logger from './logger.js';
 import { SDK_QUERY_CLOSED_MESSAGE } from './claude-agent-sdk-constants.js';
 import { createAuthRoutes } from './routes/auth.js';
 import { PUBLIC_HOST, ENCRYPTION_KEY } from './config.js';
-import settingsRoutes from './routes/settings.js';
-import { createFeathersApp, cookieAuthMiddleware, configureChannels } from './feathers.js';
+import createSettingsRoutes from './routes/settings.js';
+import { createRequireAuth } from './middleware/auth.js';
+import {
+  createFeathersApp,
+  cookieAuthMiddleware,
+  configureChannels,
+} from './feathers.js';
 import { registerFeathersServices } from './services/feathers/index.js';
 import { DevserverProxy } from './services/devserver-proxy.js';
 import { loadBaguetteConfig } from './services/baguette-config.js';
@@ -67,6 +72,9 @@ app.use(cookieAuthMiddleware(app));
 app.configure(rest());
 registerFeathersServices(app);
 
+const requireAuth = createRequireAuth(app);
+app.use(createSettingsRoutes(requireAuth));
+
 // Dev only: redirect GET / to the frontend dev server (e.g. Vite)
 if (process.env.VITE_SERVER_ENABLED === 'true') {
   app.get('/', (req, res) => {
@@ -92,7 +100,6 @@ app.hooks({
 });
 
 app.use(createAuthRoutes(app));
-app.use(settingsRoutes);
 
 if (process.env.VITE_SERVER_ENABLED !== 'true') {
   const clientDist = path.join(__dirname, '..', 'client', 'dist');
@@ -105,18 +112,32 @@ if (process.env.VITE_SERVER_ENABLED !== 'true') {
 app.setup(server);
 configureChannels(app);
 
-// WebSocket proxy for devserver subdomains
-server.on('upgrade', async (req, socket, _head) => {
+// WebSocket proxy for devserver subdomains (host + signed preview cookie).
+// Replace the default upgrade chain so Engine.io only runs after we know this is
+// not a preview devserver WS (avoids Engine.io's non-matching-path destroy race
+// with async previewSession). Baguette Socket.io on preview hosts still uses SOCKET_PATH.
+const upgradeListeners = server.listeners('upgrade').slice();
+server.removeAllListeners('upgrade');
+server.on('upgrade', async (req, socket, head) => {
   const session = await devserverProxy.previewSession(req);
   if (session === undefined) {
+    for (const fn of upgradeListeners) {
+      fn.call(server, req, socket, head);
+    }
     return;
   }
+
   if (session === null) {
     socket.destroy();
     return;
   }
 
-  devserverProxy.handlePreviewUpgrade(req, socket, session);
+  try {
+    await devserverProxy.handlePreviewUpgrade(req, socket, head, session);
+  } catch (err) {
+    logger.error(err, 'Preview WebSocket upgrade failed');
+    socket.destroy();
+  }
 });
 
 const PORT = process.env.PORT || 3000;

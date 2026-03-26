@@ -1,15 +1,21 @@
-import db from '../db.js';
+/**
+ * Express middleware: requires signed userId cookie and sets req.user with decrypted
+ * secrets (same shape as cookieAuthMiddleware). Uses the Feathers users service so
+ * github_token / access_token are available to routes — raw SQL rows only have *_encrypted.
+ */
+export function createRequireAuth(app) {
+  return async function requireAuth(req, res, next) {
+    const userId = req.signedCookies?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Not authenticated' });
+    }
 
-export function requireAuth(req, res, next) {
-  const userId = req.signedCookies?.userId;
-  if (!userId) {
-    return res.status(401).json({ error: 'Not authenticated' });
-  }
+    if (req.user && String(req.user.id) === String(userId) && req.user.approved) {
+      return next();
+    }
 
-  db('users')
-    .where({ id: userId })
-    .first()
-    .then((user) => {
+    try {
+      const user = await app.service('users').get(userId, {});
       if (!user) {
         res.clearCookie('userId');
         return res.status(401).json({ error: 'User not found' });
@@ -19,6 +25,12 @@ export function requireAuth(req, res, next) {
       }
       req.user = user;
       next();
-    })
-    .catch(next);
+    } catch (err) {
+      if (err.code === 404 || err.name === 'NotFound') {
+        res.clearCookie('userId');
+        return res.status(401).json({ error: 'User not found' });
+      }
+      next(err);
+    }
+  };
 }
