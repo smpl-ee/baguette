@@ -12,13 +12,13 @@ import { Task } from '../task.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const listenerPath = join(__dirname, '../../scripts/task-signal-listener.js');
 
-async function waitFor(pred, { timeoutMs = 10_000, intervalMs = 50 } = {}) {
+async function waitFor(pred, { timeoutMs = 5_000, intervalMs = 50, msg = '' } = {}) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (pred()) return;
     await delay(intervalMs);
   }
-  throw new Error(`Timeout waiting for condition after ${timeoutMs}ms`);
+  throw new Error(`Timeout waiting for condition after ${timeoutMs}ms. ${msg}`);
 }
 
 describe('Task kill integration', () => {
@@ -37,9 +37,9 @@ describe('Task kill integration', () => {
         env: { ...process.env },
       });
 
-      await waitFor(() => task.getLogs().includes('signal-listener started'));
+      await waitFor(() => task.getLogs().includes('signal-listener started'), { msg: `Logs: ${task.getLogs()}` });
       task.kill()
-      await waitFor(() => task.getLogs().includes('received SIGTERM'), { timeoutMs: 5000 });
+      await waitFor(() => task.getLogs().includes('received SIGTERM'), { timeoutMs: 5000, msg: `Logs: ${task.getLogs()}` });
       expect(task.status).toBe('running');
 
       // We could wait for the auto-force-kill, but let's keep the test short. 

@@ -177,6 +177,7 @@ export class DevserverProxy {
     const cookies = cookie.parse(req.headers.cookie || '');
     const signed = cookies['baguette_preview'] || '';
     const shortId = signed.startsWith('s:') ? unsign(signed.slice(2), ENCRYPTION_KEY) : false;
+
     if (!shortId || shortId !== session.short_id) {
       socket.destroy();
       return;
@@ -274,7 +275,7 @@ export class DevserverProxy {
       socket.on('error', () => proxySocket.destroy());
     });
 
-    proxyReq.on('error', () => socket.destroy());
+    proxyReq.on('error', (err) => { logger.error({ err: err.message }, 'DEBUG _proxyUpgrade error'); socket.destroy(); });
     proxyReq.end();
   }
 

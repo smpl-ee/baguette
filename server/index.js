@@ -14,6 +14,7 @@ import {
   createFeathersApp,
   cookieAuthMiddleware,
   configureChannels,
+  SOCKET_PATH,
 } from './feathers.js';
 import { registerFeathersServices } from './services/feathers/index.js';
 import { DevserverProxy } from './services/devserver-proxy.js';
@@ -119,6 +120,7 @@ configureChannels(app);
 const upgradeListeners = server.listeners('upgrade').slice();
 server.removeAllListeners('upgrade');
 server.on('upgrade', async (req, socket, head) => {
+  logger.info({ host: req.headers.host, url: req.url }, 'DEBUG upgrade event');
   const session = await devserverProxy.previewSession(req);
   if (session === undefined) {
     for (const fn of upgradeListeners) {
@@ -129,6 +131,15 @@ server.on('upgrade', async (req, socket, head) => {
 
   if (session === null) {
     socket.destroy();
+    return;
+  }
+
+  // Baguette's own Socket.IO still works on preview hosts (e.g. for the UI embedded in an iframe).
+  // Only match the exact outer SOCKET_PATH (± trailing slash) — sub-paths like /_baguette/ws/3a96
+  // belong to an inner devserver using a custom SOCKET_PATH and must be proxied, not forwarded.
+  const pathname = new URL(req.url, 'http://x').pathname;
+  if (pathname === SOCKET_PATH || pathname === SOCKET_PATH + '/') {
+    for (const fn of upgradeListeners) fn.call(server, req, socket, head);
     return;
   }
 

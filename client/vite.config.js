@@ -5,7 +5,7 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 const APP_PORT = process.env.PORT || 3000;
 const VITE_PORT = parseInt(process.env.VITE_PORT) || 5173;
-const SOCKET_PATH = process.env.SOCKET_PATH || '/_baguette/ws';
+const SOCKET_PATH = process.env.SOCKET_PATH || '/_baguette/ws/default'; 
 
 export default defineConfig({
   define: {

@@ -9,7 +9,7 @@
 /* eslint-disable no-console -- script stdout is the contract under test */
 console.log('signal-listener started');
 
-for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP', 'SIGUSR2']) {
+for (const sig of ['SIGTERM', 'SIGINT']) {
   process.on(sig, () => {
     console.log(`received ${sig}`);
   });

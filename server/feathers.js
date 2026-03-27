@@ -77,7 +77,7 @@ export function createSendToUserChannel(app) {
  * Create the Feathers app (Express-compatible). Does not register services or channels;
  * those are added by the caller (index.js and service files).
  */
-export const SOCKET_PATH = process.env.SOCKET_PATH || '/_baguette/ws';
+export const SOCKET_PATH = process.env.SOCKET_PATH || '/_baguette/ws/default';
 
 export function createFeathersApp() {
   const app = express(feathers());
