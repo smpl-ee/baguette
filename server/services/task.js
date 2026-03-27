@@ -149,7 +149,7 @@ export class Task {
       if (this.status === 'running' && this.#process) {
         this.#process.kill('SIGKILL');
       }
-    }, 5000);
+    }, 10000);
     try {
       await this.#waitForChildExit({ timeoutMs });
     } finally {
