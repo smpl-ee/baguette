@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import fs from 'fs/promises';
 import { NotFound, BadRequest } from '@feathersjs/errors';
 import { KnexService } from '@feathersjs/knex';
 const execFileAsync = promisify(execFile);
@@ -456,7 +457,10 @@ export async function resolveSessionFromData(context) {
 
 async function withHasWebserver(session) {
   if (!session) return session;
-  const absoluteWorktreePath = resolveDataDirRelativePath(session.worktree_path);
+  const resolvedPath = resolveDataDirRelativePath(session.worktree_path);
+  const absoluteWorktreePath = resolvedPath
+    ? await fs.realpath(resolvedPath).catch(() => resolvedPath)
+    : resolvedPath;
   const config = session.worktree_path ? await loadBaguetteConfig(session.worktree_path) : null;
   return {
     ...session,
