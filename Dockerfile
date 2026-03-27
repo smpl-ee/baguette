@@ -23,6 +23,7 @@ RUN apt-get update && apt-get install -y \
     bubblewrap \
     curl \
     git \
+    git-lfs \
     gosu \
     gpg \
     imagemagick \

@@ -31,6 +31,19 @@ async function gitWithToken(token, args, opts) {
   }
 }
 
+let _lfsAvailable = null;
+async function lfsAvailable() {
+  if (_lfsAvailable === null) {
+    try {
+      await execFileAsync('git', ['lfs', 'version'], { stdio: 'pipe' });
+      _lfsAvailable = true;
+    } catch {
+      _lfsAvailable = false;
+    }
+  }
+  return _lfsAvailable;
+}
+
 function repoUrl(repoFullName) {
   return `https://github.com/${repoFullName}.git`;
 }
@@ -181,6 +194,11 @@ export async function ensureBareClone(repo, token) {
   await gitWithToken(token, ['clone', '--bare', repoUrl(repo.full_name), barePath], {
     stdio: 'pipe',
   });
+  if (await lfsAvailable()) {
+    try {
+      await gitWithToken(token, ['lfs', 'fetch', '--all'], { cwd: barePath, stdio: 'pipe' });
+    } catch { /* repo may not use LFS */ }
+  }
   return barePath;
 }
 
@@ -205,6 +223,12 @@ export async function createWorktree(repo, branch, worktreeId, token, opts = {})
     );
   }
 
+  if (await lfsAvailable()) {
+    try {
+      await gitWithToken(token, ['lfs', 'fetch', 'origin', branch], { cwd: barePath, stdio: 'pipe' });
+    } catch { /* repo may not use LFS */ }
+  }
+
   try {
     await fs.promises.access(worktreePath);
   } catch {
@@ -215,6 +239,12 @@ export async function createWorktree(repo, branch, worktreeId, token, opts = {})
       cwd: barePath,
       stdio: 'pipe',
     });
+  }
+
+  if (await lfsAvailable()) {
+    try {
+      await execFileAsync('git', ['lfs', 'checkout'], { cwd: worktreePath, stdio: 'pipe' });
+    } catch { /* ignore */ }
   }
 
   return { worktreePath };
@@ -335,6 +365,11 @@ export async function gitPull(worktreePath, remoteBranch, token) {
     cwd: worktreePath,
     stdio: 'pipe',
   });
+  if (await lfsAvailable()) {
+    try {
+      await gitWithToken(token, ['lfs', 'pull'], { cwd: worktreePath, stdio: 'pipe' });
+    } catch { /* repo may not use LFS */ }
+  }
   return { ok: true };
 }
 
