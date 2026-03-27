@@ -276,6 +276,10 @@ export default function Session() {
 
   const rawMessages = useMemo(() => (hookMessages || []).map(parseMessageRow), [hookMessages]);
   const messages = useMemo(() => reconcileMessages(rawMessages), [rawMessages]);
+  const systemPrompt = useMemo(
+    () => rawMessages.find((m) => m.type === 'system' && m.subtype === 'prompt')?.content,
+    [rawMessages]
+  );
 
   // If loadMore produced only hidden/filtered messages, keep pulling until something visible appears
   const prevMessagesLengthRef = useRef(null);
@@ -765,6 +769,7 @@ export default function Session() {
                 loadMore={loadMore}
                 loadingMore={loadingMore}
                 session={session}
+                systemPrompt={systemPrompt}
                 dismissedApproval={dismissedApproval}
                 reopenApproval={reopenApproval}
                 inlineApproval={inlineApproval}

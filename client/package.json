@@ -13,6 +13,7 @@
     "@feathersjs/feathers": "^5.0.41",
     "@feathersjs/rest-client": "^5.0.41",
     "@feathersjs/socketio-client": "^5.0.41",
+    "@floating-ui/react": "^0.27.19",
     "ansi-to-html": "^0.7.2",
     "diff": "^8.0.3",
     "lucide-react": "^0.575.0",

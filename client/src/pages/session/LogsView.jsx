@@ -31,6 +31,7 @@ function getMessageLabel(msg) {
   if (type === 'user') return 'User';
   if (type === 'assistant') return 'Assistant';
   if (type === 'result') return subtype === 'success' ? 'Result: success' : 'Result: error';
+  if (type === 'system' && subtype === 'prompt') return 'System prompt';
   if (type === 'system') return subtype ? `System: ${subtype}` : 'System';
   if (type === 'tool_progress') return 'Tool progress';
   return type;
@@ -66,6 +67,10 @@ function getMessageSummary(msg) {
   if (type === 'result') {
     if (typeof result === 'string') return result.slice(0, 120);
     return '';
+  }
+
+  if (type === 'system' && msg.subtype === 'prompt') {
+    return (msg.content || '').slice(0, 120);
   }
 
   if (type === 'system') {
@@ -190,6 +195,14 @@ function MessageDetail({ msg }) {
     );
   }
 
+  if (type === 'system' && subtype === 'prompt') {
+    return (
+      <div className="text-zinc-400 text-xs font-mono leading-5 whitespace-pre-wrap">
+        {msg.content}
+      </div>
+    );
+  }
+
   if (type === 'result') {
     return (
       <div
@@ -213,13 +226,15 @@ function LogMessage({ msg }) {
   const { type } = msg;
 
   const labelColor =
-    {
-      user: 'text-sky-400',
-      assistant: 'text-amber-400',
-      result: msg.subtype === 'success' ? 'text-emerald-400' : 'text-red-400',
-      system: 'text-zinc-400',
-      tool_progress: 'text-zinc-500',
-    }[type] || 'text-zinc-400';
+    type === 'system' && msg.subtype === 'prompt'
+      ? 'text-zinc-500'
+      : ({
+          user: 'text-sky-400',
+          assistant: 'text-amber-400',
+          result: msg.subtype === 'success' ? 'text-emerald-400' : 'text-red-400',
+          system: 'text-zinc-400',
+          tool_progress: 'text-zinc-500',
+        }[type] || 'text-zinc-400');
 
   const summary = getMessageSummary(msg);
 

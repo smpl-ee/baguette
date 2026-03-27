@@ -143,7 +143,9 @@ export default function Dashboard() {
     permissionMode,
     planMode,
     model,
-    continueExistingBranch,
+    createNewBranch,
+    autoCreatePR,
+    autoPush,
   }) => {
     const params = {
       repo_full_name: repoFullName,
@@ -151,8 +153,10 @@ export default function Dashboard() {
       initial_prompt: initialPrompt,
       permission_mode: permissionMode,
       plan_mode: planMode,
+      create_new_branch: createNewBranch ?? true,
+      auto_create_pr: autoCreatePR ?? true,
+      auto_push: autoPush ?? true,
     };
-    if (continueExistingBranch) params.continue_existing_branch = true;
     if (model) params.model = model;
     if (files?.length) {
       try {

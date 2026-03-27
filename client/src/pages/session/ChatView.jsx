@@ -3,10 +3,14 @@ import {
   AlertCircle,
   GitPullRequest,
   GitMerge,
+  GitCommitHorizontal,
   CircleCheck,
   MessageSquare,
   GitCompare,
   RotateCcw,
+  ChevronRight,
+  ChevronDown,
+  Terminal,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { messagesService, sessionsService } from '../../feathers.js';
@@ -18,12 +22,43 @@ import { isMobile } from '../../utils/isMobile.js';
 import { usePersistentState } from '../../hooks/usePersistentState.js';
 import ApprovalInline from '../../components/ApprovalInline.jsx';
 import MergeConfirmModal from '../../components/MergeConfirmModal.jsx';
+import Tooltip from '../../components/Tooltip.jsx';
+
+function SystemPromptEntry({ content }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="border border-zinc-800 rounded-lg overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-zinc-800/40 transition-colors text-left"
+      >
+        <Terminal className="w-3.5 h-3.5 shrink-0 text-zinc-500" />
+        <span className="text-xs font-medium text-zinc-500">System prompt</span>
+        <span className="text-zinc-600 text-xs truncate flex-1 min-w-0">{content.slice(0, 80)}</span>
+        {expanded ? (
+          <ChevronDown className="w-3.5 h-3.5 text-zinc-600 shrink-0" />
+        ) : (
+          <ChevronRight className="w-3.5 h-3.5 text-zinc-600 shrink-0" />
+        )}
+      </button>
+      {expanded && (
+        <div className="px-3 pb-3 pt-1 border-t border-zinc-800 bg-zinc-900/50">
+          <pre className="text-zinc-500 text-xs font-mono leading-5 whitespace-pre-wrap overflow-auto max-h-96">
+            {content}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function ChatView({
   messages,
   loadMore,
   loadingMore,
   session,
+  systemPrompt,
   dismissedApproval,
   reopenApproval,
   inlineApproval,
@@ -200,6 +235,7 @@ export default function ChatView({
               <div className="w-4 h-4 border-2 border-zinc-600 border-t-transparent rounded-full animate-spin" />
             </div>
           )}
+          {systemPrompt && <SystemPromptEntry content={systemPrompt} />}
           {messages.map((msg, i) => (
             <ChatMessage
               key={i}
@@ -246,12 +282,48 @@ export default function ChatView({
               </button>
             </div>
           )}
+          {!readonly && session?.auto_push === false && session?.status === 'completed' && (
+            <div className="flex gap-2 flex-wrap py-2">
+              <Tooltip content="Commit any uncommitted changes and push to the remote branch.">
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleQuickSend(
+                      'Please commit all uncommitted changes with a concise, descriptive commit message and push to the remote branch using the GitPush MCP tool.'
+                    )
+                  }
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-xs text-zinc-300 transition-colors"
+                >
+                  <GitCommitHorizontal className="w-3.5 h-3.5" />
+                  Git Push
+                </button>
+              </Tooltip>
+            </div>
+          )}
+          {!readonly && !session?.pr_number && session?.status === 'completed' && (
+            <div className="flex gap-2 flex-wrap py-2">
+              <Tooltip content="Ask the agent to create a pull request for this session.">
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleQuickSend(
+                      'Please create a pull request for this work using the PrUpsert MCP tool. Write an appropriate title and description summarizing the changes made.'
+                    )
+                  }
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 border border-amber-500 rounded-lg text-xs text-white transition-colors"
+                >
+                  <GitPullRequest className="w-3.5 h-3.5" />
+                  Create PR
+                </button>
+              </Tooltip>
+            </div>
+          )}
           {!readonly &&
             session?.pr_number &&
             session?.status === 'completed' &&
             session?.pr_status !== 'merged' && (
               <div className="flex gap-2 flex-wrap py-2">
-                <div className="relative group">
+                <Tooltip content="Pull latest from the remote and base branch. Fix conflicts if any.">
                   <button
                     type="button"
                     onClick={() =>
@@ -264,19 +336,18 @@ export default function ChatView({
                     <GitPullRequest className="w-3.5 h-3.5" />
                     Git sync
                   </button>
-                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-zinc-700 text-zinc-200 text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
-                    Pull latest from the remote and base branch. Fix conflicts if any.
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowMergeModal(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-xs text-zinc-300 transition-colors"
-                >
-                  <GitMerge className="w-3.5 h-3.5" />
-                  Merge
-                </button>
-                <div className="relative group">
+                </Tooltip>
+                <Tooltip content="Merge the pull request into the base branch.">
+                  <button
+                    type="button"
+                    onClick={() => setShowMergeModal(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-xs text-zinc-300 transition-colors"
+                  >
+                    <GitMerge className="w-3.5 h-3.5" />
+                    Merge
+                  </button>
+                </Tooltip>
+                <Tooltip content="Check all PR workflow statuses and fix problems.">
                   <button
                     type="button"
                     onClick={() =>
@@ -289,11 +360,8 @@ export default function ChatView({
                     <CircleCheck className="w-3.5 h-3.5" />
                     Check CI
                   </button>
-                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-zinc-700 text-zinc-200 text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
-                    Check all PR workflow statuses and fix problems.
-                  </div>
-                </div>
-                <div className="relative group">
+                </Tooltip>
+                <Tooltip content="Check all unread comments and fix problems.">
                   <button
                     type="button"
                     onClick={() =>
@@ -306,19 +374,18 @@ export default function ChatView({
                     <MessageSquare className="w-3.5 h-3.5" />
                     Check comments
                   </button>
-                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-zinc-700 text-zinc-200 text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
-                    Check all unread comments and fix problems.
-                  </div>
-                </div>
+                </Tooltip>
                 {onViewChange && (
-                  <button
-                    type="button"
-                    onClick={() => onViewChange('diff')}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-xs text-zinc-300 transition-colors"
-                  >
-                    <GitCompare className="w-3.5 h-3.5" />
-                    Diff
-                  </button>
+                  <Tooltip content="View a diff of all changes in this session.">
+                    <button
+                      type="button"
+                      onClick={() => onViewChange('diff')}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-xs text-zinc-300 transition-colors"
+                    >
+                      <GitCompare className="w-3.5 h-3.5" />
+                      Diff
+                    </button>
+                  </Tooltip>
                 )}
               </div>
             )}

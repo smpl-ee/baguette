@@ -8,14 +8,7 @@ If the config appears incomplete or outdated — for example a test command fail
 
 # Git Operations
 
-At the end of every turn, if there are uncommitted changes:
-
-1. Commit all changes with a concise, descriptive commit message.
-2. Push to remote:
-   Call the `GitPush` tool.
-3. Check if there is a current PR and if its title/body reflects the final changes. Otherwise call:
-   `PrUpsert` with `title` and `description`.
-4. If there is no PR open, create one. If the user did not request you to make code changes, confirm with AskUserQuestion first.
+{{turn_end_instructions}}
 
 When you need to pull remote changes:
 Call `GitPull`.

@@ -20,10 +20,13 @@ function parseRepoFullName(full) {
 export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPrompt }) {
   const { user } = useAuth();
   const persistentState = usePersistentState(`builder-form-${repoFullName}`);
+  const globalState = usePersistentState('builder-form-global');
   const [branch, setBranch] = persistentState.useState('branch', '');
   const [initialPrompt, setInitialPrompt] = persistentState.useState('prompt', defaultPrompt || '');
-  const [showMore, setShowMore] = persistentState.useState('showMore', false);
-  const [continueExistingBranch, setContinueExistingBranch] = useState(false);
+  const [showMore, setShowMore] = globalState.useState('showMore', false);
+  const [createNewBranch, setCreateNewBranch] = persistentState.useState('createNewBranch', true);
+  const [autoCreatePR, setAutoCreatePR] = persistentState.useState('autoCreatePR', true);
+  const [autoPush, setAutoPush] = persistentState.useState('autoPush', true);
   const { repos } = useRepoContext();
   const [permissionMode, setPermissionMode] = persistentState.useState('permissionMode', 'default');
   const [model, setModel] = persistentState.useState('model', '');
@@ -43,9 +46,6 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
     clearingCache,
   } = useGetBranches(selectedRepo);
 
-  useEffect(() => {
-    setContinueExistingBranch(false);
-  }, [repoFullName]);
   // Auto-select default branch when repo changes
   useEffect(() => {
     if (!repoFullName) {
@@ -90,7 +90,6 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
 
   const clearForm = () => {
     persistentState.clear();
-    setContinueExistingBranch(false);
     setFiles([]);
     setFileError(null);
   };
@@ -106,7 +105,9 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
       permissionMode,
       planMode: false,
       model: model || undefined,
-      continueExistingBranch,
+      createNewBranch,
+      autoCreatePR,
+      autoPush,
     });
     clearForm();
   };
@@ -122,7 +123,9 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
       permissionMode,
       planMode: true,
       model: model || undefined,
-      continueExistingBranch,
+      createNewBranch,
+      autoCreatePR,
+      autoPush,
     });
     clearForm();
   };
@@ -139,7 +142,9 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
           permissionMode,
           planMode: false,
           model: model || undefined,
-          continueExistingBranch,
+          createNewBranch,
+      autoCreatePR,
+      autoPush,
         });
         clearForm();
       }
@@ -162,7 +167,7 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
       <div className="space-y-2">
         <div>
           <label className="mb-1 block text-sm font-medium text-zinc-300">
-            {continueExistingBranch ? 'Branch to continue' : 'Base branch'}
+            Base branch
           </label>
           <div className="flex min-w-0 items-center gap-2">
             <div className="min-w-0 flex-1">
@@ -247,15 +252,48 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
               <label className="flex cursor-pointer items-start gap-2 rounded-md border border-zinc-700/80 bg-zinc-800/40 px-3 py-2.5">
                 <input
                   type="checkbox"
-                  checked={continueExistingBranch}
-                  onChange={(e) => setContinueExistingBranch(e.target.checked)}
+                  checked={createNewBranch}
+                  onChange={(e) => setCreateNewBranch(e.target.checked)}
                   className="mt-0.5 rounded border-zinc-600 text-amber-500 focus:ring-amber-500/50"
                 />
                 <span className="text-sm text-zinc-300">
-                  <span className="font-medium text-zinc-200">Continue on this branch</span>
+                  <span className="font-medium text-zinc-200">Create a new branch for this task</span>
                   <span className="mt-0.5 block text-xs font-normal text-zinc-500">
-                    Do not create a new branch; use the selected branch as-is. If an open PR exists
-                    for it, the session links to that PR.
+                    Uncheck to continue directly on the selected branch without creating a new one.
+                  </span>
+                </span>
+              </label>
+            </div>
+            <div className="sm:col-span-2">
+              <label className="flex cursor-pointer items-start gap-2 rounded-md border border-zinc-700/80 bg-zinc-800/40 px-3 py-2.5">
+                <input
+                  type="checkbox"
+                  checked={autoPush}
+                  onChange={(e) => setAutoPush(e.target.checked)}
+                  className="mt-0.5 rounded border-zinc-600 text-amber-500 focus:ring-amber-500/50"
+                />
+                <span className="text-sm text-zinc-300">
+                  <span className="font-medium text-zinc-200">Automatically commit and push after each turn</span>
+                  <span className="mt-0.5 block text-xs font-normal text-zinc-500">
+                    At the end of each turn, the agent will commit any changes and push to the remote
+                    branch. Disable to commit and push manually via the chat interface.
+                  </span>
+                </span>
+              </label>
+            </div>
+            <div className="sm:col-span-2">
+              <label className="flex cursor-pointer items-start gap-2 rounded-md border border-zinc-700/80 bg-zinc-800/40 px-3 py-2.5">
+                <input
+                  type="checkbox"
+                  checked={autoCreatePR}
+                  onChange={(e) => setAutoCreatePR(e.target.checked)}
+                  className="mt-0.5 rounded border-zinc-600 text-amber-500 focus:ring-amber-500/50"
+                />
+                <span className="text-sm text-zinc-300">
+                  <span className="font-medium text-zinc-200">Automatically create a pull request</span>
+                  <span className="mt-0.5 block text-xs font-normal text-zinc-500">
+                    At the end of the first turn, the agent will open a PR. Disable to create it
+                    manually via the chat interface.
                   </span>
                 </span>
               </label>

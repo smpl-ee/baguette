@@ -8,11 +8,10 @@ import {
   getAllowedCommandsFromUser,
 } from '../agent-settings.js';
 import { getModelId } from '../anthropic-models.js';
-import { loadBaguetteConfig } from '../baguette-config.js';
 import { getClaudeEnv } from '../session-env.js';
 import { buildBaguetteMcpServer } from '../baguette-mcp-server.js';
 import { createMessageChannel } from '../message-channel.js';
-import loadPrompt from '../../prompts/loadPrompt.js';
+import { buildSystemPromptAppend, buildReviewerSystemPromptAppend } from '../session-prompt.js';
 import { resolveDataDirRelativePath } from '../../config.js';
 import { SDK_QUERY_CLOSED_MESSAGE } from '../../claude-agent-sdk-constants.js';
 
@@ -33,11 +32,6 @@ async function buildQueryOptions(
   { canUseTool, env, model, abortController, allowedTools, mcpServer }
 ) {
   const absoluteWorktreePath = resolveDataDirRelativePath(sessionRow.worktree_path) || '';
-  const hasBaguetteYaml = Boolean(await loadBaguetteConfig(sessionRow.worktree_path));
-  const baguetteConfigNotice = hasBaguetteYaml
-    ? ''
-    : '**IMPORTANT**: this project has no .baguette.yaml config file. Call the `ConfigRepoPrompt` tool before tackling the requested task, read the returned prompt and proceed accordingly.\n\n';
-
   return {
     cwd: absoluteWorktreePath,
     permissionMode: sessionRow.plan_mode ? 'plan' : sessionRow.permission_mode,
@@ -48,16 +42,7 @@ async function buildQueryOptions(
     systemPrompt: {
       type: 'preset',
       preset: 'claude_code',
-      append: await loadPrompt('build-prompt', {
-        base_branch: sessionRow.base_branch,
-        worktree_path: absoluteWorktreePath,
-        baguette_config_notice: baguetteConfigNotice,
-        base_prompt: await loadPrompt('base-prompt', {
-          worktree_path: absoluteWorktreePath,
-          working_directory_restrictions:
-            'Work exclusively within your current working directory. Do not read, edit, search files or run any shell command outside of it.',
-        }),
-      }),
+      append: await buildSystemPromptAppend(sessionRow),
     },
     tools: { type: 'preset', preset: 'claude_code' },
     settingSources: ['project'],
@@ -82,16 +67,7 @@ async function buildReviewerQueryOptions(
     systemPrompt: {
       type: 'preset',
       preset: 'claude_code',
-      append: await loadPrompt('reviewer-prompt', {
-        worktree_path: absoluteWorktreePath,
-        pr_number: String(sessionRow.pr_number || ''),
-        repo_full_name: sessionRow.repo_full_name || '',
-        base_prompt: await loadPrompt('base-prompt', {
-          worktree_path: absoluteWorktreePath,
-          working_directory_restrictions:
-            'Work exclusively within your current working directory. Do NOT modify, create, or delete any files.',
-        }),
-      }),
+      append: await buildReviewerSystemPromptAppend(sessionRow),
     },
     tools: { type: 'preset', preset: 'claude_code' },
     settingSources: ['project'],
@@ -364,25 +340,24 @@ export class ClaudeAgentService {
 
     const claudeEnv = await this.app.service('sessions').getClaudeEnv(sessionId);
     const mcpServer = buildBaguetteMcpServer(sessionId, sessionRow.user_id, sessionRow, this.app);
-    const queryInstance = query({
-      prompt: channel,
-      options: isReviewer
-        ? await buildReviewerQueryOptions(sessionRow, {
-            canUseTool,
-            env: claudeEnv,
-            model,
-            abortController,
-            mcpServer,
-          })
-        : await buildQueryOptions(sessionRow, {
-            canUseTool,
-            env: claudeEnv,
-            model,
-            abortController,
-            allowedTools,
-            mcpServer,
-          }),
-    });
+    const queryOptions = isReviewer
+      ? await buildReviewerQueryOptions(sessionRow, {
+          canUseTool,
+          env: claudeEnv,
+          model,
+          abortController,
+          mcpServer,
+        })
+      : await buildQueryOptions(sessionRow, {
+          canUseTool,
+          env: claudeEnv,
+          model,
+          abortController,
+          allowedTools,
+          mcpServer,
+        });
+
+    const queryInstance = query({ prompt: channel, options: queryOptions });
 
     const absoluteWorktreePath = resolveDataDirRelativePath(sessionRow.worktree_path) || '';
     const sessionState = {

@@ -22,6 +22,7 @@ import { PUBLIC_HOST, DATA_DIR, resolveDataDirRelativePath } from '../../config.
 import path from 'path';
 import { buildTaskEnv, getClaudeEnvForSession } from '../session-env.js';
 import { getEffectiveGithubToken } from '../agent-settings.js';
+import { buildSystemPromptAppend, buildReviewerSystemPromptAppend } from '../session-prompt.js';
 
 function getPreviewAuthUri(shortId) {
   const url = new URL('/preview', PUBLIC_HOST);
@@ -320,8 +321,7 @@ async function ensureShortId(context) {
 
 async function prepareSessionEnvironment(context) {
   const continueExistingBranch =
-    context.data.agent_type !== 'reviewer' && Boolean(context.data.continue_existing_branch);
-  delete context.data.continue_existing_branch;
+    context.data.agent_type !== 'reviewer' && !(context.data.create_new_branch ?? true);
 
   const {
     repo_full_name: repoFullName,
@@ -556,10 +556,37 @@ export const sessionsHooks = {
   after: {
     find: [addHasWebserver],
     get: [addHasWebserver],
-    create: [createFirstMessage, addHasWebserver],
+    create: [persistSystemPrompt, createFirstMessage, addHasWebserver],
     patch: [syncSessionSettingsAfterPatch, addHasWebserver],
   },
 };
+
+async function persistSystemPrompt(context) {
+  const session = context.result;
+  if (!session.repo_full_name) return context;
+
+  const promptAppend =
+    session.agent_type === 'reviewer'
+      ? await buildReviewerSystemPromptAppend(session)
+      : await buildSystemPromptAppend(session);
+
+  if (!promptAppend) return context;
+
+  await context.app.service('messages').create(
+    {
+      session_id: session.id,
+      type: 'system',
+      subtype: 'prompt',
+      message_json: JSON.stringify({
+        type: 'system',
+        subtype: 'prompt',
+        content: promptAppend,
+      }),
+    },
+    { provider: undefined, user: context.params.user }
+  );
+  return context;
+}
 
 async function createFirstMessage(context) {
   const session = context.result;

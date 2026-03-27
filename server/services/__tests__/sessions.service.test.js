@@ -26,6 +26,8 @@ const {
   syncSessionSettingsFromPatch,
   loadBaguetteConfig,
   generateSessionMetadata,
+  buildSystemPromptAppend,
+  buildReviewerSystemPromptAppend,
 } = vi.hoisted(() => ({
   stopSession: vi.fn().mockResolvedValue(undefined),
   onMessageCreated: vi.fn().mockResolvedValue(undefined),
@@ -34,6 +36,8 @@ const {
   generateSessionMetadata: vi
     .fn()
     .mockResolvedValue({ label: 'Test task', branchName: 'test-task-abc' }),
+  buildSystemPromptAppend: vi.fn().mockResolvedValue('mocked builder system prompt'),
+  buildReviewerSystemPromptAppend: vi.fn().mockResolvedValue('mocked reviewer system prompt'),
 }));
 
 vi.mock('child_process', () => ({
@@ -54,6 +58,11 @@ vi.mock('../baguette-config.js', async (importOriginal) => {
     loadBaguetteConfig,
   };
 });
+
+vi.mock('../session-prompt.js', () => ({
+  buildSystemPromptAppend,
+  buildReviewerSystemPromptAppend,
+}));
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -583,8 +592,11 @@ describe('Sessions service - find, get, create', (hooks) => {
           params({ id: userId1 })
         );
 
-      expect(createMessage).toHaveBeenCalledOnce();
-      const parsed = JSON.parse(createMessage.mock.calls[0][0].message_json);
+      const userMsgCall = createMessage.mock.calls.find(
+        ([data]) => data.type === 'user'
+      );
+      expect(userMsgCall).toBeTruthy();
+      const parsed = JSON.parse(userMsgCall[0].message_json);
       expect(parsed.message.content).toBe('Please add tests');
     });
 
@@ -596,7 +608,10 @@ describe('Sessions service - find, get, create', (hooks) => {
         .service('sessions')
         .create(sessionData({ repo_id: repoId, initial_prompt: '' }), params({ id: userId1 }));
 
-      expect(createMessage).not.toHaveBeenCalled();
+      const userMsgCall = createMessage.mock.calls.find(
+        ([data]) => data.type === 'user'
+      );
+      expect(userMsgCall).toBeUndefined();
     });
 
     it('rejects when not authenticated', async () => {
@@ -605,7 +620,7 @@ describe('Sessions service - find, get, create', (hooks) => {
       ).rejects.toThrow('Not authenticated');
     });
 
-    it('continue_existing_branch uses the selected branch and links an open PR when present', async () => {
+    it('create_new_branch=false uses the selected branch and links an open PR when present', async () => {
       getOpenPR.mockResolvedValueOnce({
         number: 42,
         html_url: 'https://github.com/test/repo/pull/42',
@@ -618,7 +633,7 @@ describe('Sessions service - find, get, create', (hooks) => {
         sessionData({
           repo_id: repoId,
           base_branch: 'feature/foo',
-          continue_existing_branch: true,
+          create_new_branch: false,
         }),
         params({ id: userId1 })
       );
@@ -639,7 +654,7 @@ describe('Sessions service - find, get, create', (hooks) => {
       expect(generateSessionMetadata).not.toHaveBeenCalled();
     });
 
-    it('continue_existing_branch uses default_branch as diff base when no open PR', async () => {
+    it('create_new_branch=false uses default_branch as diff base when no open PR', async () => {
       getOpenPR.mockResolvedValueOnce(null);
       await db('repos').where({ id: repoId }).update({ default_branch: 'mainline' });
 
@@ -647,7 +662,7 @@ describe('Sessions service - find, get, create', (hooks) => {
         sessionData({
           repo_id: repoId,
           base_branch: 'feature/bar',
-          continue_existing_branch: true,
+          create_new_branch: false,
         }),
         params({ id: userId1 })
       );
@@ -666,7 +681,66 @@ describe('Sessions service - find, get, create', (hooks) => {
       );
     });
 
-    it('continue_existing_branch rejects when another unarchived session uses that branch', async () => {
+    it('persists a system prompt message before the first user message', async () => {
+      const createMessage = vi.fn().mockResolvedValue({ id: 99 });
+      app.use('messages', { create: createMessage });
+
+      await app
+        .service('sessions')
+        .create(
+          sessionData({ repo_id: repoId, initial_prompt: 'Fix the bug' }),
+          params({ id: userId1 })
+        );
+
+      expect(buildSystemPromptAppend).toHaveBeenCalledTimes(1);
+      const promptCall = createMessage.mock.calls.find(
+        ([data]) => data.type === 'system' && data.subtype === 'prompt'
+      );
+      expect(promptCall).toBeTruthy();
+      const parsed = JSON.parse(promptCall[0].message_json);
+      expect(parsed.content).toBe('mocked builder system prompt');
+
+      const promptIdx = createMessage.mock.calls.indexOf(promptCall);
+      const userMsgIdx = createMessage.mock.calls.findIndex(
+        ([data]) => data.type === 'user'
+      );
+      expect(promptIdx).toBeLessThan(userMsgIdx);
+    });
+
+    it('uses the reviewer prompt for reviewer sessions', async () => {
+      const { getOpenPRByNumber } = await import('../github.js');
+      getOpenPRByNumber.mockResolvedValueOnce({
+        number: 10,
+        html_url: 'https://github.com/test/repo/pull/10',
+        title: 'Some PR',
+        head: { ref: 'feature/review-me' },
+        base: { ref: 'main' },
+      });
+
+      const createMessage = vi.fn().mockResolvedValue({ id: 99 });
+      app.use('messages', { create: createMessage });
+
+      await app.service('sessions').create(
+        sessionData({
+          repo_id: repoId,
+          agent_type: 'reviewer',
+          pr_number: 10,
+          initial_prompt: 'Review this PR',
+        }),
+        params({ id: userId1 })
+      );
+
+      expect(buildReviewerSystemPromptAppend).toHaveBeenCalledTimes(1);
+      expect(buildSystemPromptAppend).not.toHaveBeenCalled();
+      const promptCall = createMessage.mock.calls.find(
+        ([data]) => data.type === 'system' && data.subtype === 'prompt'
+      );
+      expect(promptCall).toBeTruthy();
+      const parsed = JSON.parse(promptCall[0].message_json);
+      expect(parsed.content).toBe('mocked reviewer system prompt');
+    });
+
+    it('create_new_branch=false rejects when another unarchived session uses that branch', async () => {
       await db('sessions').where({ id: sessId1 }).update({
         created_branch: 'feature/taken',
         remote_branch: 'feature/taken',
@@ -677,7 +751,7 @@ describe('Sessions service - find, get, create', (hooks) => {
           sessionData({
             repo_id: repoId,
             base_branch: 'feature/taken',
-            continue_existing_branch: true,
+            create_new_branch: false,
           }),
           params({ id: userId1 })
         )
