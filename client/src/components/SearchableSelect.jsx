@@ -73,7 +73,14 @@ export default function SearchableSelect({
           ? emptyText
           : placeholder;
 
-  const showClosedSelected = search === null && selectedItem;
+  const showClosedSelected = search === null && (selectedItem || value);
+
+  const renderSelectedContent = () => {
+    if (selectedItem) {
+      return renderSelected ? renderSelected(selectedItem) : getOptionLabel(selectedItem);
+    }
+    return String(value);
+  };
 
   const openSearchAndFocus = () => {
     setSearch('');
@@ -96,7 +103,7 @@ export default function SearchableSelect({
           className={`w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2.5 text-sm text-white placeholder-zinc-500 focus:border-transparent focus:outline-none focus:ring-2 ${ring} disabled:opacity-50 ${
             showClosedSelected
               ? 'absolute inset-0 z-0 min-h-10.5 opacity-0 pointer-events-none'
-              : 'relative z-10'
+              : 'relative'
           }`}
         />
         {showClosedSelected &&
@@ -104,7 +111,7 @@ export default function SearchableSelect({
             <div
               className={`relative z-10 w-full rounded-md border ${border} bg-zinc-800 px-3 py-2.5 text-sm text-white opacity-50`}
             >
-              {renderSelected ? renderSelected(selectedItem) : getOptionLabel(selectedItem)}
+              {renderSelectedContent()}
             </div>
           ) : (
             <button
@@ -113,7 +120,7 @@ export default function SearchableSelect({
               className={`relative z-10 w-full rounded-md border ${border} bg-zinc-800 px-3 py-2.5 text-sm text-white text-left cursor-pointer focus:outline-none focus:ring-2 ${ring}`}
               aria-label="Change selection"
             >
-              {renderSelected ? renderSelected(selectedItem) : getOptionLabel(selectedItem)}
+              {renderSelectedContent()}
             </button>
           ))}
       </div>
