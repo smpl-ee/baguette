@@ -151,7 +151,7 @@ export class ClaudeAgentService {
     const { id: sessionId, user_id: userId } = session;
 
     const sessionRow = await db('sessions').where({ id: sessionId }).first();
-    const sessionUser = await db('users').where({ id: userId }).first();
+    const sessionUser = await this.app.service('users').get(userId, {});
     const sessionState = await this._startAgentLoop({ sessionId, sessionRow, user: sessionUser });
 
     await this.app
@@ -416,7 +416,7 @@ export class ClaudeAgentService {
     if (!sessionRow) throw new Error('Session not found');
     if (!sessionRow.claude_session_id) throw new Error('No Claude session to resume');
 
-    const user = await db('users').where({ id: sessionRow.user_id }).first();
+    const user = await this.app.service('users').get(sessionRow.user_id, {});
 
     const sessionState = await this._startAgentLoop({
       sessionId,

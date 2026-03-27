@@ -120,6 +120,8 @@ function makeMockApp(db) {
         return { patch: sessionPatch, remove: sessionRemove, emit: sessionEmit, getClaudeEnv };
       if (name === 'messages') return { create: messageCreate, remove: genericRemove };
       if (name === 'tasks') return { create: createTask, deleteSessionTasks };
+      if (name === 'users')
+        return { get: vi.fn().mockResolvedValue({ id: 1, github_token: 'tok' }) };
       return { patch: vi.fn(), create: vi.fn(), remove: genericRemove };
     }),
     // Exposed for assertions

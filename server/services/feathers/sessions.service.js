@@ -181,10 +181,9 @@ export class SessionsService extends KnexService {
     const session = params.resolvedSession;
     // Refresh PR status in the background (skip if already merged)
     if (session?.pr_number && session.pr_status !== 'merged') {
-      const db = this.app.get('db');
-      db('users')
-        .where({ id: session.user_id })
-        .first()
+      this.app
+        .service('users')
+        .get(session.user_id, {})
         .then((user) => {
           const token = getEffectiveGithubToken(user);
           if (!token) return;
@@ -205,8 +204,7 @@ export class SessionsService extends KnexService {
     if (!session?.worktree_path) return { diff: '' };
     const cwd = resolveDataDirRelativePath(session.worktree_path);
     try {
-      const db = this.app.get('db');
-      const user = await db('users').where({ id: session.user_id }).first();
+      const user = await this.app.service('users').get(session.user_id, {});
       const token = getEffectiveGithubToken(user);
       if (token && session.base_branch) {
         await gitFetch(cwd, token, session.base_branch).catch(() => {});
@@ -234,8 +232,7 @@ export class SessionsService extends KnexService {
   async merge(data, params) {
     const session = params.resolvedSession;
     if (!session?.pr_number) throw new BadRequest('No PR to merge');
-    const db = this.app.get('db');
-    const user = await db('users').where({ id: session.user_id }).first();
+    const user = await this.app.service('users').get(session.user_id, {});
     const token = getEffectiveGithubToken(user);
     if (!token) throw new BadRequest('No GitHub token configured');
     await mergePR(token, session.repo_full_name, session.pr_number);

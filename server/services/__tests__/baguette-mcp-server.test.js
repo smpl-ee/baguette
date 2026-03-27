@@ -104,7 +104,10 @@ function makeApp(sessionData, { tasksCreate } = {}) {
   };
   const app = {
     get: (key) => (key === 'db' ? db : null),
-    service: () => ({ patch: mockPatch, getTaskEnv: mockGetTaskEnv, create: mockCreate }),
+    service: (name) => {
+      if (name === 'users') return { get: async () => ({ id: 1, github_token: 'tok' }) };
+      return { patch: mockPatch, getTaskEnv: mockGetTaskEnv, create: mockCreate };
+    },
   };
   return { app, mockPatch, mockGetTaskEnv, mockCreate };
 }

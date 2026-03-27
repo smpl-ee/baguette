@@ -67,7 +67,7 @@ export function buildBaguetteMcpServer(sessionId, userId, sessionRow, app) {
   const db = app.get('db');
 
   const getToken = async () => {
-    const user = await db('users').where({ id: userId }).first();
+    const user = await app.service('users').get(userId, {});
     return getEffectiveGithubToken(user);
   };
 

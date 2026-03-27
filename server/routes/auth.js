@@ -22,7 +22,7 @@ export function createAuthRoutes(app) {
               github_id: 0,
               username: 'dev',
               email: 'dev@baguette.local',
-              access_token: devGhKey,
+              github_token: devGhKey,
               approved: true,
             },
             {} // internal call — no provider, no user required
