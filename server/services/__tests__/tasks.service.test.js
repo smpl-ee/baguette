@@ -206,7 +206,7 @@ describe('Tasks service — in-memory', (hooks) => {
   describe('task.kill', () => {
     it('kills a running task and returns { success }', async () => {
       const t1 = app.service('tasks').getTask(taskId1);
-      t1.kill = vi.fn().mockReturnValue(true);
+      t1.kill = vi.fn().mockResolvedValue(true);
 
       const result = await app.service('tasks').kill(taskId1, providerParams(userId1));
       expect(t1.kill).toHaveBeenCalled();

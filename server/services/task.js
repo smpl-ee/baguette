@@ -118,18 +118,43 @@ export class Task {
     return this;
   }
 
+  #waitForChildExit({ timeoutMs }) {
+    if (this.status !== 'running' || !this.#process) {
+      return Promise.resolve();
+    }
+    const child = this.#process;
+    return new Promise((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        child.removeListener('exit', done);
+        resolve();
+      }, timeoutMs);
+      child.once('exit', done);
+    });
+  }
+
   /**
-   * Send SIGTERM; escalate to SIGKILL after 5 s if still running.
-   * @returns {boolean} true if a signal was sent, false if already exited/no process.
+   * Send SIGTERM; escalate to SIGKILL after 5 s if still running; await until the child exits or `timeoutMs`.
+   * @returns {Promise<boolean>} true if a signal was sent, false if already exited/no process.
    */
-  kill() {
-    if (this.status !== 'running' || !this.#process) return false;
+  async kill({ timeoutMs = 12000 } = {}) {
+    if (this.status !== 'running' || !this.#process) {
+      return false;
+    }
     this.#process.kill('SIGTERM');
-    setTimeout(() => {
+    const escalation = setTimeout(() => {
       if (this.status === 'running' && this.#process) {
         this.#process.kill('SIGKILL');
       }
     }, 5000);
+    try {
+      await this.#waitForChildExit({ timeoutMs });
+    } finally {
+      clearTimeout(escalation);
+    }
     return true;
   }
 

@@ -52,10 +52,10 @@ describe('Task', () => {
     expect(task.getLogs()).toBe('');
   });
 
-  it('kill() returns false when not running', () => {
+  it('kill() resolves false when not running', async () => {
     const task = new Task({ id: 1, sessionId: 1, command: 'x', taskService: service });
     task.status = 'exited';
-    expect(task.kill()).toBe(false);
+    await expect(task.kill()).resolves.toBe(false);
   });
 });
 
@@ -141,10 +141,9 @@ describe('TasksService.deleteTask', () => {
     expect(service.deleteTask(999)).toBe(false);
   });
 
-  it('force-kills a running process before deleting', () => {
+  it('starts kill then drops the task from the store', () => {
     const task = service.createTask({ sessionId: 1, command: 'x' });
-    const kill = vi.fn();
-    // Patch forceKill to verify it's called.
+    const kill = vi.fn().mockResolvedValue(true);
     task.kill = kill;
     service.deleteTask(task.id);
     expect(kill).toHaveBeenCalled();
@@ -152,14 +151,14 @@ describe('TasksService.deleteTask', () => {
 });
 
 describe('TasksService.killSessionTasks', () => {
-  it('kills all running tasks for a session', () => {
+  it('starts kill for all running tasks for a session', () => {
     const t1 = service.createTask({ sessionId: 1, command: 'a' });
     const t2 = service.createTask({ sessionId: 1, command: 'b' });
     const t3 = service.createTask({ sessionId: 2, command: 'c' });
 
-    const kill1 = vi.fn().mockReturnValue(true);
-    const kill2 = vi.fn().mockReturnValue(true);
-    const kill3 = vi.fn().mockReturnValue(true);
+    const kill1 = vi.fn().mockResolvedValue(true);
+    const kill2 = vi.fn().mockResolvedValue(true);
+    const kill3 = vi.fn().mockResolvedValue(true);
     t1.kill = kill1;
     t2.kill = kill2;
     t3.kill = kill3;

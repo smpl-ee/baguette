@@ -146,9 +146,17 @@ server.listen(PORT, HOST, () => {
   logger.info({ port: PORT, host: HOST ?? 'default' }, 'Server running');
 });
 
-function shutdown() {
+let shuttingDown = false;
+
+async function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
   logger.info('Shutting down');
-  app.service('tasks').killAllTasks();
+  try {
+    await app.service('tasks').killAllTasks();
+  } catch (err) {
+    logger.error({ err }, 'Error while stopping tasks');
+  }
   process.exit(0);
 }
 

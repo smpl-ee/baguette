@@ -3,6 +3,7 @@ import { Task } from '../task.js';
 import { requireUser, only, disableExternal } from './hooks.js';
 import { resolveDataDirRelativePath } from '../../config.js';
 import { loadBaguetteConfig, getScriptCommand } from '../baguette-config.js';
+import logger from '../../logger.js';
 
 const MAX_TASKS = 20; // Only keeps 20 task (running + history)
 
@@ -65,22 +66,22 @@ export class TasksService {
   }
 
   /**
-   * Remove a task from memory (force-killing its process if still running).
+   * Remove a task from memory (starts graceful kill if still running; does not wait for exit).
    * Returns true if the task existed.
    */
   deleteTask(id) {
     const task = this._tasks.get(Number(id));
     if (!task) return false;
-    task.kill();
+    task.kill().catch((err) => logger.error(err, 'Error while killing task during deleteTask'));
     this._tasks.delete(Number(id));
     return true;
   }
 
-  /** Kill all running tasks for a session (SIGTERM). */
+  /** Starts graceful kill for each running task in a session; does not wait for exit. */
   killSessionTasks(sessionId) {
     for (const task of this._tasks.values()) {
       if (task.session_id === sessionId && task.status === 'running') {
-        task.kill();
+        void task.kill().catch(() => {});
       }
     }
   }
@@ -94,11 +95,13 @@ export class TasksService {
     for (const id of ids) this.deleteTask(id);
   }
 
-  /** SIGKILL all running tasks and clear the store. For server shutdown. */
-  killAllTasks() {
-    for (const task of this._tasks.values()) {
-      task.forceKill();
-    }
+  /**
+   * SIGTERM each running task (same as user "stop task"), wait for exit, then clear the store.
+   * For server shutdown so child processes can exit cleanly before `process.exit`.
+   */
+  async killAllTasks() {
+    const running = Array.from(this._tasks.values()).filter((t) => t.status === 'running');
+    await Promise.all(running.map((t) => t.kill()));
     this._tasks.clear();
   }
 
@@ -189,14 +192,14 @@ export class TasksService {
   /** Remove a task from memory (kills its process if still running). */
   async remove(id, params) {
     const pub = await this.get(id, params); // verifies ownership
-    await this.deleteTask(id);
+    this.deleteTask(id);
     this.emit('removed', pub);
     return pub;
   }
 
   async kill(data, params) {
     const task = await this.get(data, params);
-    const success = this.getTask(task.id)?.kill() ?? false;
+    const success = (await this.getTask(task.id)?.kill()) ?? false;
     return { success };
   }
 
