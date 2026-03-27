@@ -12,6 +12,7 @@ import {
   ScrollText,
   GitBranch,
   Archive,
+  PanelLeft,
 } from 'lucide-react';
 import { useSessionsContext } from '../context/SessionsContext.jsx';
 import { useFilters } from '../context/FilterContext.jsx';
@@ -266,6 +267,7 @@ export default function Session() {
   const [prInfo, setPrInfo] = useState(null);
   const [killedTaskIds, setKilledTaskIds] = useState(new Set());
   const [showTasks, setShowTasks] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(null);
   const [diffFiles, setDiffFiles] = useState([]);
   const [showMenu, setShowMenu] = useState(false);
   const [models, setModels] = useState([]);
@@ -492,6 +494,13 @@ export default function Session() {
       )
     : null;
 
+    let sidebarClassName = "hidden md:flex"
+    if (showSidebar) {
+      sidebarClassName = "flex"
+    }
+    if (showSidebar === false) {
+      sidebarClassName = "hidden"
+    }
   return (
     <div className="flex-1 min-h-0 flex flex-col">
       {/* Top Bar */}
@@ -696,8 +705,8 @@ export default function Session() {
       {/* Sidebar (full height) + main column (tabs + views + tasks) */}
       <div className="flex flex-1 min-h-0 overflow-hidden relative">
         {/* Sessions Sidebar - md+ only; top-aligned with tab row */}
-        <div className="hidden md:flex w-64 flex-col border-r border-zinc-800 bg-zinc-900 shrink-0 min-h-0">
-          <div className="px-3 py-2 border-b border-zinc-800">
+        <div className={`${sidebarClassName} w-64 flex-col border-r border-zinc-800 bg-zinc-900 shrink-0 min-h-0`}>
+          <div className="px-3 py-2 border-b border-zinc-800 flex items-center justify-between">
             <Link
               to="/"
               className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
@@ -705,6 +714,13 @@ export default function Session() {
               <Plus className="w-3 h-3" />
               <span>New session</span>
             </Link>
+            <button
+              onClick={() => setShowSidebar(false)}
+              className="text-zinc-600 hover:text-zinc-400 transition-colors"
+              title="Hide sidebar"
+            >
+              <PanelLeft className="w-3.5 h-3.5" />
+            </button>
           </div>
           <div className="flex-1 overflow-auto min-h-0">
             {[
@@ -745,6 +761,13 @@ export default function Session() {
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {/* View tabs — only above chat/diff/logs + tasks */}
           <div className="flex shrink-0 items-center gap-1 border-b border-zinc-800 bg-zinc-900 px-3 sm:px-4">
+            <button
+              onClick={() => setShowSidebar((v) => !v)}
+              className="items-center justify-center mr-1 text-zinc-500 hover:text-zinc-300 transition-colors"
+              title={showSidebar ? 'Hide sidebar' : 'Show sidebar'}
+            >
+              <PanelLeft className="w-4 h-4" />
+            </button>
             {VIEWS.map(({ id, label, Icon }) => (
               <button
                 key={id}
