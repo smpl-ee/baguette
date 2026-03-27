@@ -13,6 +13,24 @@ export function gitAuthArgs(token) {
   return ['-c', `http.https://github.com/.extraheader=Authorization: Basic ${encoded}`];
 }
 
+function sanitizeGitError(token, err) {
+  const encoded = Buffer.from(`x-access-token:${token}`).toString('base64');
+  const sanitize = (s) =>
+    typeof s === 'string' ? s.replaceAll(encoded, '[REDACTED]').replaceAll(token, '[REDACTED]') : s;
+  err.message = sanitize(err.message);
+  if (err.stderr) err.stderr = sanitize(err.stderr.toString());
+  if (err.stdout) err.stdout = sanitize(err.stdout.toString());
+  return err;
+}
+
+async function gitWithToken(token, args, opts) {
+  try {
+    return await execFileAsync('git', [...gitAuthArgs(token), ...args], opts);
+  } catch (err) {
+    throw sanitizeGitError(token, err);
+  }
+}
+
 function repoUrl(repoFullName) {
   return `https://github.com/${repoFullName}.git`;
 }
@@ -160,11 +178,9 @@ export async function ensureBareClone(repo, token) {
   } catch {
     /* path may not exist */
   }
-  await execFileAsync(
-    'git',
-    [...gitAuthArgs(token), 'clone', '--bare', repoUrl(repo.full_name), barePath],
-    { stdio: 'pipe' }
-  );
+  await gitWithToken(token, ['clone', '--bare', repoUrl(repo.full_name), barePath], {
+    stdio: 'pipe',
+  });
   return barePath;
 }
 
@@ -175,17 +191,16 @@ export async function createWorktree(repo, branch, worktreeId, token, opts = {})
   const worktreePath = path.join(REPOS_DIR, repo.stripped_name, 'sessions', worktreeId);
   await fs.promises.mkdir(path.dirname(worktreePath), { recursive: true });
 
-  await execFileAsync(
-    'git',
-    [...gitAuthArgs(token), 'fetch', 'origin', `${branch}:${branch}`, '--prune'],
-    { cwd: barePath, stdio: 'pipe' }
-  );
+  await gitWithToken(token, ['fetch', 'origin', `${branch}:${branch}`, '--prune'], {
+    cwd: barePath,
+    stdio: 'pipe',
+  });
 
   // Also fetch the base branch so origin/<baseBranch> is up to date for merge-base diffs
   if (baseBranch && baseBranch !== branch) {
-    await execFileAsync(
-      'git',
-      [...gitAuthArgs(token), 'fetch', 'origin', `${baseBranch}:refs/remotes/origin/${baseBranch}`],
+    await gitWithToken(
+      token,
+      ['fetch', 'origin', `${baseBranch}:refs/remotes/origin/${baseBranch}`],
       { cwd: barePath, stdio: 'pipe' }
     );
   }
@@ -289,7 +304,7 @@ export async function worktreeNeedsSync(worktreePath) {
  */
 export async function remoteHasNewCommits(worktreePath, remoteBranch, token, _repoFullName) {
   try {
-    await execFileAsync('git', [...gitAuthArgs(token), 'fetch', 'origin', remoteBranch], {
+    await gitWithToken(token, ['fetch', 'origin', remoteBranch], {
       cwd: worktreePath,
       stdio: 'pipe',
     });
@@ -308,19 +323,15 @@ export async function remoteHasNewCommits(worktreePath, remoteBranch, token, _re
 
 export async function gitPull(worktreePath, remoteBranch, token) {
   try {
-    await execFileAsync(
-      'git',
-      [...gitAuthArgs(token), 'ls-remote', '--exit-code', 'origin', remoteBranch],
-      {
-        cwd: worktreePath,
-        stdio: 'pipe',
-      }
-    );
+    await gitWithToken(token, ['ls-remote', '--exit-code', 'origin', remoteBranch], {
+      cwd: worktreePath,
+      stdio: 'pipe',
+    });
   } catch {
     return { ok: true, message: 'Remote branch not found, skipping pull' };
   }
 
-  await execFileAsync('git', [...gitAuthArgs(token), 'pull', 'origin', remoteBranch], {
+  await gitWithToken(token, ['pull', 'origin', remoteBranch], {
     cwd: worktreePath,
     stdio: 'pipe',
   });
@@ -329,9 +340,9 @@ export async function gitPull(worktreePath, remoteBranch, token) {
 
 export async function gitFetch(worktreePath, token, branch) {
   const args = branch
-    ? [...gitAuthArgs(token), 'fetch', 'origin', `${branch}:refs/remotes/origin/${branch}`]
-    : [...gitAuthArgs(token), 'fetch', '--all'];
-  const { stdout: output } = await execFileAsync('git', args, {
+    ? ['fetch', 'origin', `${branch}:refs/remotes/origin/${branch}`]
+    : ['fetch', '--all'];
+  const { stdout: output } = await gitWithToken(token, args, {
     cwd: worktreePath,
     stdio: 'pipe',
   });
@@ -349,11 +360,10 @@ export async function gitPush(worktreePath, token) {
   const branch = branchOut.trim();
 
   try {
-    await execFileAsync(
-      'git',
-      [...gitAuthArgs(token), 'push', '--set-upstream', 'origin', branch],
-      { cwd: worktreePath, stdio: 'pipe' }
-    );
+    await gitWithToken(token, ['push', '--set-upstream', 'origin', branch], {
+      cwd: worktreePath,
+      stdio: 'pipe',
+    });
   } catch (pushErr) {
     const stderr = pushErr.stderr?.toString() ?? '';
     if (stderr.includes('[rejected]') || stderr.includes('Updates were rejected')) {
