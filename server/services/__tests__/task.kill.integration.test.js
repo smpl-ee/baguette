@@ -28,7 +28,7 @@ describe('Task kill integration', () => {
       const task = new Task({
         id: 1,
         sessionId: 1,
-        command: listenerPath,
+        command: `exec node ${listenerPath}`,
         taskService: null,
       });
 
