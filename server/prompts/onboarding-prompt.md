@@ -61,7 +61,7 @@ config:
 2. **Configure the session block**:
    - Set `session.env` with all environment variables needed to run the app
    - Use `${{ baguette.session.short_id }}` in database names to isolate each session (e.g. `myapp_${{ baguette.session.short_id }}`)
-   - Use `${{ baguette.session.public_uri }}` when the app needs to know its own public URL (e.g. `NEXT_PUBLIC_APP_URL: ${{ baguette.session.public_uri }}`)
+   - **Always set `PUBLIC_HOST: "${{ baguette.session.public_uri }}"` in `session.env`** — this is required for host-restriction config in step 3 (allowed hosts, Action Cable origins, etc.) and for any app that needs to know its own public URL. Also set framework-specific variants if needed (e.g. `NEXT_PUBLIC_APP_URL: ${{ baguette.session.public_uri }}`)
    - Set `session.init` with commands to install deps, create per-session databases, run migrations, and run seeds (e.g., `rails db:seed`, `pnpm run db:seed`) if a seeding command exists in the project
    - **Prefer `pnpm install` over `npm install` or `yarn install`** to save storage space via pnpm's global content-addressable package cache. If the project uses npm or yarn, add `pnpm = "latest"` to `.mise.toml` to make pnpm available, then use `pnpm install` in the init script.
    - Set `session.cleanup` to tear down per-session databases
@@ -80,14 +80,22 @@ config:
    - **Allow the baguette public URI as an allowed host**: the dev server will receive requests with the baguette public hostname, so configure it to accept that host. **Do not allow all hosts** (avoid `allowedHosts: 'all'`, `ALLOWED_HOSTS = ['*']`, `config.hosts.clear`, etc.). Instead, add `PUBLIC_HOST: "${{ baguette.session.public_uri }}"` to `session.env` and configure the dev server to read from it specifically:
      - Vite: `server: { allowedHosts: [new URL(process.env.PUBLIC_HOST).hostname] }` in `vite.config.js`
      - Next.js: `allowedDevOrigins: [process.env.PUBLIC_HOST]` in `next.config.js`
-     - Rails: `config.hosts << URI.parse(ENV['PUBLIC_HOST']).host`
+     - Rails: `config.hosts << URI.parse(ENV['PUBLIC_HOST']).host` in `config/environments/development.rb`
      - Django: `ALLOWED_HOSTS = [urlparse(os.environ['PUBLIC_HOST']).hostname]`
+   - **WebSocket / real-time servers**: if the app uses WebSockets or server-sent events, configure their allowed origins the same way:
+     - Rails Action Cable: add `config.action_cable.allowed_request_origins = [ENV['PUBLIC_HOST']]` in `config/environments/development.rb`
+     - Socket.io (Node.js): `new Server(httpServer, { cors: { origin: process.env.PUBLIC_HOST } })`
+     - Django Channels: covered by `ALLOWED_HOSTS` above when using ASGI
 
 4. **Check the global docker-compose file** at `{{DOCKER_COMPOSE_PATH}}`:
    - Read the file to see what services already exist (postgres, redis, etc.)
    - If the project needs services not yet defined, add them to the global docker-compose file. It there is already a service defined let's just use it. We can be lose on service versions, just ask the user if they are ok with it. (For example if we have a postgres:16 already available in compose but the project is on postgres v8)
    - Start any newly added services with `docker compose -f {{DOCKER_COMPOSE_PATH}} up -d <service>`
    - Update the corresponding connection URLs in `session.env` to reference the docker service host. You can use the docker compose service name as host (e.g. after adding or finding a "postgres" service on the docker compose file, add `DATABASE_URL: "postgres://user:pass@postgres/..."`)
+   - **Never use `localhost` or `127.0.0.1` for docker-compose services**: baguette sessions run inside Docker, so `localhost` resolves to the session container itself — not the host and not other containers. Always use the docker-compose service name as the hostname (e.g. `postgres`, `redis`, `mysql`). Docker's internal DNS resolves these names correctly across containers. For example:
+     - PostgreSQL: `DATABASE_URL: "postgres://user:pass@postgres:5432/myapp"`
+     - Redis: `REDIS_URL: "redis://redis:6379/0"`
+     - MySQL: `DATABASE_URL: "mysql2://user:pass@mysql:3306/myapp"`
 
 5. **Configure per-session database isolation**:
    - Each session gets a unique `shortId`. Use it in database names so sessions don't interfere
