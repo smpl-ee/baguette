@@ -28,6 +28,7 @@ RUN apt-get update && apt-get install -y \
     gpg \
     imagemagick \
     libffi-dev \
+    libseccomp-dev \
     libjemalloc2 \
     libreadline-dev \
     libsqlite3-0 \
