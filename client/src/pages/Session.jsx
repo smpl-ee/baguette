@@ -270,6 +270,7 @@ export default function Session() {
   const [showSidebar, setShowSidebar] = useState(null);
   const [diffFiles, setDiffFiles] = useState([]);
   const [hasDiff, setHasDiff] = useState(null);
+  const [hasUncommitted, setHasUncommitted] = useState(null);
   const [showMenu, setShowMenu] = useState(false);
   const [models, setModels] = useState([]);
   const [activeTaskModal, setActiveTaskModal] = useState(null);
@@ -338,12 +339,15 @@ export default function Session() {
   }, [sessionId]);
 
   useEffect(() => {
-    if (!sessionId || session?.pr_number || session?.status !== 'completed') return;
+    if (!sessionId || session?.status !== 'completed') return;
     sessionsService
       .diff(sessionId)
-      .then((res) => setHasDiff((res.diff || '').trim().length > 0))
+      .then((res) => {
+        setHasDiff((res.diff || '').trim().length > 0);
+        setHasUncommitted(res.hasUncommitted ?? false);
+      })
       .catch(() => {});
-  }, [sessionId, session?.pr_number, session?.status]);
+  }, [sessionId, session?.status]);
 
   useEffect(() => {
     const onAppError = (msg) => {
@@ -810,6 +814,7 @@ export default function Session() {
                 onViewChange={setView}
                 readonly={isReadonly}
                 hasDiff={hasDiff}
+                hasUncommitted={hasUncommitted}
               />
             )}
             {activeView === 'diff' && <DiffView session={session} onFilesChange={setDiffFiles} />}

@@ -9,6 +9,7 @@ import { loadBaguetteConfig, getAvailableCommands, getScriptCommand } from '../b
 import {
   removeWorktree,
   gitDiff,
+  gitHasUncommitted,
   gitFetch,
   mergePR,
   getPRStatus,
@@ -211,9 +212,13 @@ export class SessionsService extends KnexService {
       if (token && session.base_branch) {
         await gitFetch(cwd, token, session.base_branch).catch(() => {});
       }
-      return { diff: await gitDiff(cwd, session.base_branch) };
+      const [diff, hasUncommitted] = await Promise.all([
+        gitDiff(cwd, session.base_branch),
+        gitHasUncommitted(cwd),
+      ]);
+      return { diff, hasUncommitted };
     } catch (err) {
-      return { diff: '', error: err.message };
+      return { diff: '', hasUncommitted: false, error: err.message };
     }
   }
 

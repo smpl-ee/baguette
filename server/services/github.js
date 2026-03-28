@@ -422,6 +422,21 @@ export async function gitPush(worktreePath, token) {
 const MAX_DIFF_BUFFER_SIZE = 5 * 1024 * 1024;
 
 /**
+ * Returns true if there are uncommitted changes in the worktree.
+ * @returns {Promise<boolean>}
+ */
+export async function gitHasUncommitted(worktreePath) {
+  try {
+    const { stdout } = await execFileAsync('git', ['-C', worktreePath, 'status', '--porcelain'], {
+      maxBuffer: 256,
+    });
+    return stdout.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Returns the unified diff between baseBranch and HEAD in the worktree.
  * @returns {Promise<string>}
  */

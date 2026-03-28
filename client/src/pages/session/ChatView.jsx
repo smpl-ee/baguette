@@ -67,6 +67,7 @@ export default function ChatView({
   onViewChange,
   readonly,
   hasDiff,
+  hasUncommitted,
 }) {
   const persistentState = usePersistentState(
     session?.id ? `session-chat-${session.id}` : undefined
@@ -283,7 +284,7 @@ export default function ChatView({
               </button>
             </div>
           )}
-          {!readonly && session?.auto_push === false && session?.status === 'completed' && (
+          {!readonly && session?.status === 'completed' && hasUncommitted === true && (
             <div className="flex gap-2 flex-wrap py-2">
               <Tooltip content="Commit any uncommitted changes and push to the remote branch.">
                 <button
