@@ -34,7 +34,13 @@ async function buildQueryOptions(
   const absoluteWorktreePath = resolveDataDirRelativePath(sessionRow.worktree_path) || '';
   return {
     cwd: absoluteWorktreePath,
-    permissionMode: sessionRow.plan_mode ? 'plan' : sessionRow.permission_mode,
+    // For bypassPermissions, use acceptEdits as the SDK-level mode — full bypass is handled
+    // in canUseTool which auto-approves all tool calls when permissionMode is bypassPermissions.
+    permissionMode: sessionRow.plan_mode
+      ? 'plan'
+      : sessionRow.permission_mode === 'bypassPermissions'
+        ? 'acceptEdits'
+        : sessionRow.permission_mode,
     resume: sessionRow.claude_session_id,
     canUseTool,
     env,
@@ -247,11 +253,16 @@ export class ClaudeAgentService {
     };
   }
 
-  createCanUseTool(sessionId, userId, permissionRequests) {
+  createCanUseTool(sessionId, userId, permissionRequests, sessionSettings) {
     const app = this.app;
     return async (toolName, input, { signal }) => {
       // Auto-allow all baguette MCP tools without showing approval UI
       if (toolName.startsWith('mcp__baguette__')) {
+        return { behavior: 'allow', updatedInput: input };
+      }
+
+      // Auto-approve everything in bypass mode
+      if (sessionSettings.permissionMode === 'bypassPermissions') {
         return { behavior: 'allow', updatedInput: input };
       }
 
@@ -333,9 +344,12 @@ export class ClaudeAgentService {
     const abortController = new AbortController();
     const isReviewer = sessionRow.agent_type === 'reviewer';
 
+    const sessionSettings = {
+      permissionMode: sessionRow.plan_mode ? 'plan' : sessionRow.permission_mode,
+    };
     const canUseTool = isReviewer
       ? this.createReviewerCanUseTool(sessionId, sessionRow.user_id, permissionRequests)
-      : this.createCanUseTool(sessionId, sessionRow.user_id, permissionRequests);
+      : this.createCanUseTool(sessionId, sessionRow.user_id, permissionRequests, sessionSettings);
     const allowedTools = isReviewer ? [] : commandsToAllowedTools(getAllowedCommandsFromUser(user));
 
     const claudeEnv = await this.app.service('sessions').getClaudeEnv(sessionId);
@@ -373,6 +387,7 @@ export class ClaudeAgentService {
       queryInstance,
       permissionRequests,
       abortController,
+      sessionSettings,
       ...stateOverrides,
     };
 
@@ -544,7 +559,14 @@ export class ClaudeAgentService {
     const session = this.getActiveSession(sessionId);
     if (!session?.queryInstance) return;
     const effectiveMode = sessionRow.plan_mode ? 'plan' : sessionRow.permission_mode;
-    session.queryInstance.setPermissionMode(effectiveMode);
+    if (session.sessionSettings) {
+      session.sessionSettings.permissionMode = effectiveMode;
+    }
+    // For bypassPermissions, use acceptEdits as the SDK-level mode — full bypass is handled
+    // in canUseTool which auto-approves all tool calls when permissionMode is bypassPermissions.
+    session.queryInstance.setPermissionMode(
+      effectiveMode === 'bypassPermissions' ? 'acceptEdits' : effectiveMode
+    );
     session.queryInstance.setModel(sessionRow.model);
   }
 
