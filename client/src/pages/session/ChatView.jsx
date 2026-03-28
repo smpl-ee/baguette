@@ -66,6 +66,7 @@ export default function ChatView({
   onModeChange,
   onViewChange,
   readonly,
+  hasDiff,
 }) {
   const persistentState = usePersistentState(
     session?.id ? `session-chat-${session.id}` : undefined
@@ -300,7 +301,7 @@ export default function ChatView({
               </Tooltip>
             </div>
           )}
-          {!readonly && !session?.pr_number && session?.status === 'completed' && (
+          {!readonly && !session?.pr_number && session?.status === 'completed' && hasDiff !== false && (
             <div className="flex gap-2 flex-wrap py-2">
               <Tooltip content="Ask the agent to create a pull request for this session.">
                 <button

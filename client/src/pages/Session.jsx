@@ -269,6 +269,7 @@ export default function Session() {
   const [showTasks, setShowTasks] = useState(false);
   const [showSidebar, setShowSidebar] = useState(null);
   const [diffFiles, setDiffFiles] = useState([]);
+  const [hasDiff, setHasDiff] = useState(null);
   const [showMenu, setShowMenu] = useState(false);
   const [models, setModels] = useState([]);
   const [activeTaskModal, setActiveTaskModal] = useState(null);
@@ -335,6 +336,14 @@ export default function Session() {
       .then((d) => setConfigCommands(d.commands || []))
       .catch(() => {});
   }, [sessionId]);
+
+  useEffect(() => {
+    if (!sessionId || session?.pr_number || session?.status !== 'completed') return;
+    sessionsService
+      .diff(sessionId)
+      .then((res) => setHasDiff((res.diff || '').trim().length > 0))
+      .catch(() => {});
+  }, [sessionId, session?.pr_number, session?.status]);
 
   useEffect(() => {
     const onAppError = (msg) => {
@@ -800,6 +809,7 @@ export default function Session() {
                 onModeChange={setPermissionMode}
                 onViewChange={setView}
                 readonly={isReadonly}
+                hasDiff={hasDiff}
               />
             )}
             {activeView === 'diff' && <DiffView session={session} onFilesChange={setDiffFiles} />}

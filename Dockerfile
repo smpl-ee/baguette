@@ -81,6 +81,7 @@ RUN chmod +x /app/bin/entrypoint.sh
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOME=/home/baguette
+ENV PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig:/usr/lib/pkgconfig
 ENV MISE_TRUSTED_CONFIG_PATHS=/data/.config/mise:/data/.baguette/repos
 ENV COMPOSE_PROJECT_NAME=baguette
 
