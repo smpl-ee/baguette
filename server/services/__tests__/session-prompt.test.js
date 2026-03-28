@@ -50,36 +50,36 @@ async function seedSession(fields = {}) {
 describe('buildTurnEndInstructions', () => {
   describe('with values from the DB (SQLite stores booleans as 0/1)', () => {
     it('auto_push=1, auto_create_pr=1: includes commit/push and PR creation', async () => {
-      const session = await seedSession({ auto_push: 1, auto_create_pr: 1 });
+      const session = await seedSession({ auto_push: true, auto_create_pr: true });
       const result = buildTurnEndInstructions(session);
-      expect(result).toContain('Commit all changes');
+      expect(result).toContain('Stage and commit');
       expect(result).toContain('GitPush');
       expect(result).toContain('If there is no PR open, create one');
     });
 
     it('auto_push=1, auto_create_pr=0: includes commit/push but forbids PR creation', async () => {
-      const session = await seedSession({ auto_push: 1, auto_create_pr: 0 });
+      const session = await seedSession({ auto_push: true, auto_create_pr: false });
       const result = buildTurnEndInstructions(session);
-      expect(result).toContain('Commit all changes');
+      expect(result).toContain('Stage and commit');
       expect(result).toContain('GitPush');
       expect(result).toContain('Do NOT create a pull request');
       expect(result).not.toContain('If there is no PR open, create one');
     });
 
     it('auto_push=0: forbids commit/push entirely regardless of auto_create_pr', async () => {
-      const session = await seedSession({ auto_push: 0, auto_create_pr: 1 });
+      const session = await seedSession({ auto_push: false, auto_create_pr: true });
       const result = buildTurnEndInstructions(session);
       expect(result).toContain('Do NOT commit or push');
-      expect(result).not.toContain('Commit all changes');
+      expect(result).not.toContain('Stage and commit');
       expect(result).not.toContain('GitPush');
       expect(result).not.toContain('create one');
     });
 
     it('auto_push=0, auto_create_pr=0: forbids everything', async () => {
-      const session = await seedSession({ auto_push: 0, auto_create_pr: 0 });
+      const session = await seedSession({ auto_push: false, auto_create_pr: false });
       const result = buildTurnEndInstructions(session);
       expect(result).toContain('Do NOT commit or push');
-      expect(result).not.toContain('Commit all changes');
+      expect(result).not.toContain('Stage and commit');
     });
   });
 
@@ -87,7 +87,7 @@ describe('buildTurnEndInstructions', () => {
     it('omitting flags uses defaults: push and PR enabled', async () => {
       const session = await seedSession();
       const result = buildTurnEndInstructions(session);
-      expect(result).toContain('Commit all changes');
+      expect(result).toContain('Stage and commit');
       expect(result).toContain('If there is no PR open, create one');
     });
   });
@@ -105,14 +105,14 @@ describe('buildSystemPromptAppend', () => {
   });
 
   it('includes commit/push instructions when auto_push=1', async () => {
-    const session = await seedSession({ auto_push: 1 });
+    const session = await seedSession({ auto_push: true });
     const result = await buildSystemPromptAppend(session);
-    expect(result).toContain('Commit all changes');
+    expect(result).toContain('Stage and commit');
     expect(result).toContain('GitPush');
   });
 
   it('includes no-push instruction when auto_push=0', async () => {
-    const session = await seedSession({ auto_push: 0 });
+    const session = await seedSession({ auto_push: false });
     const result = await buildSystemPromptAppend(session);
     expect(result).toContain('Do NOT commit or push');
   });

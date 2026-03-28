@@ -21,27 +21,26 @@ export default function Tooltip({ children, content, placement = 'top' }) {
     whileElementsMounted: autoUpdate,
     middleware: [offset(6), flip(), shift({ padding: 8 })],
   });
+  const { setReference, setFloating } = refs;
 
   const hover = useHover(context);
   const { getReferenceProps, getFloatingProps } = useInteractions([hover]);
 
   return (
     <>
-      <span ref={refs.setReference} {...getReferenceProps()} className="inline-flex">
+      <span ref={setReference} {...getReferenceProps()} className="contents">
         {children}
       </span>
-      {open && (
-        <FloatingPortal>
-          <div
-            ref={refs.setFloating}
-            style={floatingStyles}
-            {...getFloatingProps()}
-            className="z-[9999] px-2 py-1 bg-zinc-700 text-zinc-200 text-xs rounded whitespace-nowrap pointer-events-none"
-          >
-            {content}
-          </div>
-        </FloatingPortal>
-      )}
+      <FloatingPortal>
+        <div
+          ref={setFloating}
+          style={{ ...floatingStyles, display: open ? undefined : 'none' }}
+          {...getFloatingProps()}
+          className="z-[9999] px-2 py-1 bg-zinc-700 text-zinc-200 text-xs rounded whitespace-nowrap pointer-events-none"
+        >
+          {content}
+        </div>
+      </FloatingPortal>
     </>
   );
 }
