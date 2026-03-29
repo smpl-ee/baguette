@@ -226,6 +226,7 @@ export class ClaudeAgentService {
       'WebSearch',
       'TodoWrite',
       'TodoRead',
+      'Write', // needed to write/update the plan file used for review accumulation
     ]);
     const REVIEWER_MCP_TOOLS = new Set([
       'mcp__baguette__PrRead',
@@ -240,7 +241,7 @@ export class ClaudeAgentService {
     const askUserQuestionHandler = this.createCanUseTool(sessionId, userId, permissionRequests);
 
     return async (toolName, input, ctx) => {
-      if (toolName === 'AskUserQuestion') {
+      if (toolName === 'AskUserQuestion' || toolName === 'ExitPlanMode') {
         return askUserQuestionHandler(toolName, input, ctx);
       }
       if (ALLOWED_TOOLS.has(toolName) || REVIEWER_MCP_TOOLS.has(toolName)) {

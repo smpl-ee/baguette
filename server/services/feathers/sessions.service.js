@@ -360,6 +360,7 @@ async function prepareSessionEnvironment(context) {
       created_branch: pr.head.ref,
       remote_branch: pr.head.ref,
       label: `Review: ${pr.title}`,
+      plan_mode: 1,
     });
   } else if (continueExistingBranch) {
     const workingBranch = baseBranch;
