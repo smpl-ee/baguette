@@ -565,15 +565,16 @@ function PluginsTab() {
       <form onSubmit={handleInstall} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 sm:p-5 mb-6">
         <h2 className="text-sm font-medium text-zinc-300 mb-1">Install Plugin</h2>
         <p className="text-xs text-zinc-500 mb-3">
-          Enter a GitHub URL pointing to a plugin directory, e.g.{' '}
-          <code className="text-zinc-400">https://github.com/owner/repo/tree/main/path/to/plugin</code>
+          Enter a GitHub URL: repo root (e.g.{' '}
+          <code className="text-zinc-400">…/tree/main</code>) or a subdirectory (e.g.{' '}
+          <code className="text-zinc-400">…/tree/main/plugins/foo</code>).
         </p>
         <div className="flex gap-2">
           <input
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="https://github.com/owner/repo/tree/main/path/to/plugin"
+            placeholder="https://github.com/owner/repo/tree/main"
             className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 font-mono min-w-0"
           />
           <button

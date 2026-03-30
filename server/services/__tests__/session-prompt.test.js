@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createTestDb } from '../../test-utils/db.js';
-import { buildTurnEndInstructions, buildSystemPromptAppend } from '../session-prompt.js';
+import { buildSystemPromptAppend } from '../session-prompt.js';
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 

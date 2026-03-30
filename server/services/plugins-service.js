@@ -11,24 +11,29 @@ const execFileAsync = promisify(execFile);
 
 /**
  * Parse a full GitHub plugin URL.
- * Accepts: https://github.com/owner/repo/tree/branch/path/to/plugin
+ * Accepts: https://github.com/owner/repo/tree/branch[/path/to/plugin]
+ * If the path is omitted, the plugin lives at the repo root (path ".").
  * Returns: { owner, repo, branch, pluginPath }
  */
 export function parsePluginInput(input) {
   input = input.trim();
   const urlMatch = input.match(
-    /^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/tree\/([^/]+)\/(.*)/
+    /^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/tree\/([^/]+)(?:\/(.*))?$/
   );
   if (!urlMatch) {
     throw new Error(
-      `Invalid plugin URL: "${input}". Expected https://github.com/owner/repo/tree/branch/path/to/plugin`
+      `Invalid plugin URL: "${input}". Expected https://github.com/owner/repo/tree/branch or …/tree/branch/path/to/plugin`
     );
+  }
+  let pluginPath = (urlMatch[4] ?? '').replace(/\/$/, '');
+  if (!pluginPath) {
+    pluginPath = '.';
   }
   return {
     owner: urlMatch[1],
     repo: urlMatch[2],
     branch: urlMatch[3],
-    pluginPath: urlMatch[4].replace(/\/$/, ''),
+    pluginPath,
   };
 }
 
