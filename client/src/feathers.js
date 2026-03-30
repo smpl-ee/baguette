@@ -9,7 +9,7 @@ app.configure(socketio(socket));
 
 export default app;
 export const sessionsService = app.service('sessions');
-sessionsService.methods('stop', 'commands', 'resolvePermission', 'diff', 'showDiff', 'merge');
+sessionsService.methods('stop', 'commands', 'resolvePermission', 'diff', 'showDiff', 'merge', 'push');
 export const messagesService = app.service('messages');
 export const tasksService = app.service('tasks');
 tasksService.methods('kill', 'logs');

@@ -25,7 +25,6 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
   const [initialPrompt, setInitialPrompt] = persistentState.useState('prompt', defaultPrompt || '');
   const [showMore, setShowMore] = globalState.useState('showMore', false);
   const [createNewBranch, setCreateNewBranch] = persistentState.useState('createNewBranch', true);
-  const [autoCreatePR, setAutoCreatePR] = persistentState.useState('autoCreatePR', true);
   const [autoPush, setAutoPush] = persistentState.useState('autoPush', true);
   const { repos } = useRepoContext();
   const [permissionMode, setPermissionMode] = persistentState.useState('permissionMode', 'default');
@@ -115,7 +114,6 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
       planMode: false,
       model: model || undefined,
       createNewBranch,
-      autoCreatePR,
       autoPush,
       plugins: selectedPlugins.length > 0 ? selectedPlugins : undefined,
     });
@@ -134,7 +132,6 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
       planMode: true,
       model: model || undefined,
       createNewBranch,
-      autoCreatePR,
       autoPush,
       plugins: selectedPlugins.length > 0 ? selectedPlugins : undefined,
     });
@@ -154,7 +151,6 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
           planMode: false,
           model: model || undefined,
           createNewBranch,
-          autoCreatePR,
           autoPush,
           plugins: selectedPlugins.length > 0 ? selectedPlugins : undefined,
         });
@@ -289,23 +285,6 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
                   <span className="mt-0.5 block text-xs font-normal text-zinc-500">
                     At the end of each turn, the agent will commit any changes and push to the remote
                     branch. Disable to commit and push manually via the chat interface.
-                  </span>
-                </span>
-              </label>
-            </div>
-            <div className="sm:col-span-2">
-              <label className="flex cursor-pointer items-start gap-2 rounded-md border border-zinc-700/80 bg-zinc-800/40 px-3 py-2.5">
-                <input
-                  type="checkbox"
-                  checked={autoCreatePR}
-                  onChange={(e) => setAutoCreatePR(e.target.checked)}
-                  className="mt-0.5 rounded border-zinc-600 text-amber-500 focus:ring-amber-500/50"
-                />
-                <span className="text-sm text-zinc-300">
-                  <span className="font-medium text-zinc-200">Automatically create a pull request</span>
-                  <span className="mt-0.5 block text-xs font-normal text-zinc-500">
-                    At the end of the first turn, the agent will open a PR. Disable to create it
-                    manually via the chat interface.
                   </span>
                 </span>
               </label>

@@ -8,7 +8,11 @@ If the config appears incomplete or outdated — for example a test command fail
 
 # Git Operations
 
-{{turn_end_instructions}}
+At the end of every turn, if there are uncommitted changes:
+
+1. Stage and commit: always use `git add -A && git commit -m "concise message"` — never stage individual files, to ensure nothing is missed.
+2. Push to remote: Call the `GitPush` tool.
+3. Call `PrUpsert` with a `title` and `description` that reflect the work done. If there is no PR open and the user did not request code changes, confirm with AskUserQuestion first.
 
 When you need to pull remote changes:
 Call `GitPull`.

@@ -110,6 +110,13 @@ export function buildBaguetteMcpServer(sessionId, userId, sessionRow, app) {
       ),
 
       tool('GitPush', 'Push the current branch to origin and set upstream.', {}, async () => {
+        const session = await getSession();
+        if (!session.auto_push) {
+          return ok({
+            message:
+              'Auto-push is disabled. Changes have been committed locally. The user can push manually or enable auto-push using the controls at the bottom of the chat.',
+          });
+        }
         let result;
         try {
           result = await gitPush(absoluteWorktreePath, await getToken());
@@ -156,6 +163,14 @@ export function buildBaguetteMcpServer(sessionId, userId, sessionRow, app) {
         },
         async ({ title, description = '' }) => {
           const session = await getSession();
+          // Always persist label and description to session regardless of auto_push
+          await patchSession({ label: title, pr_description: description });
+          if (!session.auto_push) {
+            return ok({
+              message:
+                'Auto-push is disabled. The PR has not been created/updated on GitHub. The user can push manually or enable auto-push using the controls at the bottom of the chat.',
+            });
+          }
           let head = null;
           if (!session.pr_number) {
             const { stdout } = await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
@@ -182,23 +197,22 @@ export function buildBaguetteMcpServer(sessionId, userId, sessionRow, app) {
               );
             }
           }
+          // Re-read session since we may have patched it above
+          const freshSession = await getSession();
           const pr = await upsertPR(await getToken(), {
-            repoFullName: session.repo_full_name,
-            prNumber: session.pr_number,
+            repoFullName: freshSession.repo_full_name,
+            prNumber: freshSession.pr_number,
             title,
             body: description,
             head,
-            baseBranch: session.base_branch,
+            baseBranch: freshSession.base_branch,
           });
-          if (!session.pr_number) {
+          if (!freshSession.pr_number) {
             await patchSession({
               pr_url: pr.url,
               pr_number: pr.number,
               pr_status: 'open',
-              label: title,
             });
-          } else {
-            await patchSession({ label: title });
           }
           return ok({ url: pr.url, number: pr.number });
         }

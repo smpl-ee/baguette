@@ -271,6 +271,7 @@ export default function Session() {
   const [diffFiles, setDiffFiles] = useState([]);
   const [hasDiff, setHasDiff] = useState(null);
   const [hasUncommitted, setHasUncommitted] = useState(null);
+  const [commitsToPush, setCommitsToPush] = useState(0);
   const [showMenu, setShowMenu] = useState(false);
   const [models, setModels] = useState([]);
   const [activeTaskModal, setActiveTaskModal] = useState(null);
@@ -345,6 +346,7 @@ export default function Session() {
       .then((res) => {
         setHasDiff((res.diff || '').trim().length > 0);
         setHasUncommitted(res.hasUncommitted ?? false);
+        setCommitsToPush(res.commitsToPush ?? 0);
       })
       .catch(() => {});
   }, [sessionId, session?.status]);
@@ -795,6 +797,27 @@ export default function Session() {
                 {label}
               </button>
             ))}
+            {!isReadonly && session?.pr_status !== 'merged' && (
+              <div className="ml-auto flex items-center gap-1.5 py-2 pr-1">
+                <span className="text-xs text-zinc-500">Auto-push</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={!!session?.auto_push}
+                  onClick={() => {
+                    if (!session?.id) return;
+                    sessionsService
+                      .patch(session.id, { auto_push: !session.auto_push })
+                      .catch((err) => toastError('Failed to update auto-push setting', err));
+                  }}
+                  className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors focus:outline-none ${session?.auto_push ? 'bg-amber-500' : 'bg-zinc-600'}`}
+                >
+                  <span
+                    className={`inline-block h-3 w-3 rounded-full bg-white shadow transition-transform ${session?.auto_push ? 'translate-x-3.5' : 'translate-x-0.5'}`}
+                  />
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="relative flex min-h-0 flex-1 overflow-hidden">
@@ -815,85 +838,87 @@ export default function Session() {
                 readonly={isReadonly}
                 hasDiff={hasDiff}
                 hasUncommitted={hasUncommitted}
+                commitsToPush={commitsToPush}
+                onCommitsPushed={() => setCommitsToPush(0)}
               />
             )}
             {activeView === 'diff' && <DiffView session={session} onFilesChange={setDiffFiles} />}
             {activeView === 'logs' && (
               <LogsView rawMessages={rawMessages} loadMore={loadMore} loadingMore={loadingMore} />
             )}
+          </div>
+        </div>
 
-            {/* Task Panel - always visible at lg+, slide-over below */}
-            {showTasks && (
-              <div
-                className="xl:hidden fixed inset-0 bg-black/50 z-30"
-                onClick={() => setShowTasks(false)}
-              />
-            )}
-            <div
-              className={
-                showTasks
-                  ? 'flex fixed inset-y-0 right-0 w-[85vw] max-w-sm z-40 xl:relative xl:inset-auto xl:w-80 xl:z-auto border-l border-zinc-800 bg-zinc-900 flex-col'
-                  : 'hidden xl:flex xl:w-80 border-l border-zinc-800 bg-zinc-900 flex-col'
-              }
+        {/* Task Panel - same level as sessions sidebar, full height */}
+        {showTasks && (
+          <div
+            className="xl:hidden fixed inset-0 bg-black/50 z-30"
+            onClick={() => setShowTasks(false)}
+          />
+        )}
+        <div
+          className={
+            showTasks
+              ? 'flex fixed inset-y-0 right-0 w-[85vw] max-w-sm z-40 xl:relative xl:inset-auto xl:w-80 xl:z-auto border-l border-zinc-800 bg-zinc-900 flex-col'
+              : 'hidden xl:flex xl:w-80 border-l border-zinc-800 bg-zinc-900 flex-col'
+          }
+        >
+          <div className="px-3 py-2 border-b border-zinc-800 flex items-center justify-between">
+            <h3 className="text-sm font-medium text-zinc-300">
+              {activeView === 'diff' ? 'Files' : 'Tasks'}
+            </h3>
+            <button
+              onClick={() => setShowTasks(false)}
+              className="text-zinc-500 hover:text-zinc-300 xl:hidden p-1"
             >
-              <div className="px-3 py-2 border-b border-zinc-800 flex items-center justify-between">
-                <h3 className="text-sm font-medium text-zinc-300">
-                  {activeView === 'diff' ? 'Files' : 'Tasks'}
-                </h3>
-                <button
-                  onClick={() => setShowTasks(false)}
-                  className="text-zinc-500 hover:text-zinc-300 xl:hidden p-1"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-              {activeView === 'diff' ? (
-                <div className="flex-1 overflow-auto min-h-0">
-                  {diffFiles.length === 0 ? (
-                    <p className="text-xs text-zinc-500 px-3 py-4">No files changed</p>
-                  ) : (
-                    diffFiles.map((file, i) => {
-                      const displayPath =
-                        file.newPath !== '/dev/null' ? file.newPath : file.oldPath;
-                      return (
-                        <button
-                          key={i}
-                          onClick={() => {
-                            setShowTasks(false);
-                            document
-                              .getElementById(`diff-file-${i}`)
-                              ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                          }}
-                          className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left hover:bg-zinc-800 transition-colors border-b border-zinc-800/50"
-                        >
-                          <span className="font-mono text-xs text-zinc-300 truncate flex-1 min-w-0">
-                            {displayPath}
-                          </span>
-                          <span className="text-xs text-emerald-400 shrink-0">
-                            +{file.addedCount}
-                          </span>
-                          <span className="text-xs text-red-400 shrink-0">
-                            -{file.removedCount}
-                          </span>
-                        </button>
-                      );
-                    })
-                  )}
-                </div>
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          {activeView === 'diff' ? (
+            <div className="flex-1 overflow-auto min-h-0">
+              {diffFiles.length === 0 ? (
+                <p className="text-xs text-zinc-500 px-3 py-4">No files changed</p>
               ) : (
-                <TaskPanel
-                  tasks={tasks}
-                  configCommands={configCommands}
-                  onStart={handleTaskStart}
-                  onKill={handleTaskKill}
-                  onDelete={handleTaskDelete}
-                  onRetry={handleTaskRetry}
-                  onViewLogs={handleViewTaskLogs}
-                  readonly={isReadonly}
-                />
+                diffFiles.map((file, i) => {
+                  const displayPath =
+                    file.newPath !== '/dev/null' ? file.newPath : file.oldPath;
+                  return (
+                    <button
+                      key={i}
+                      onClick={() => {
+                        setShowTasks(false);
+                        document
+                          .getElementById(`diff-file-${i}`)
+                          ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      }}
+                      className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left hover:bg-zinc-800 transition-colors border-b border-zinc-800/50"
+                    >
+                      <span className="font-mono text-xs text-zinc-300 truncate flex-1 min-w-0">
+                        {displayPath}
+                      </span>
+                      <span className="text-xs text-emerald-400 shrink-0">
+                        +{file.addedCount}
+                      </span>
+                      <span className="text-xs text-red-400 shrink-0">
+                        -{file.removedCount}
+                      </span>
+                    </button>
+                  );
+                })
               )}
             </div>
-          </div>
+          ) : (
+            <TaskPanel
+              tasks={tasks}
+              configCommands={configCommands}
+              onStart={handleTaskStart}
+              onKill={handleTaskKill}
+              onDelete={handleTaskDelete}
+              onRetry={handleTaskRetry}
+              onViewLogs={handleViewTaskLogs}
+              readonly={isReadonly}
+            />
+          )}
         </div>
       </div>
 

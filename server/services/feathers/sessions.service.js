@@ -10,9 +10,12 @@ import {
   removeWorktree,
   gitDiff,
   gitHasUncommitted,
+  gitCommitsToPush,
   gitFetch,
+  gitPush,
   mergePR,
   getPRStatus,
+  upsertPR,
   createWorktree,
   getOpenPRByNumber,
   getOpenPR,
@@ -209,14 +212,19 @@ export class SessionsService extends KnexService {
     try {
       const user = await this.app.service('users').get(session.user_id, {});
       const token = getEffectiveGithubToken(user);
-      if (token && session.base_branch) {
-        await gitFetch(cwd, token, session.base_branch).catch(() => {});
-      }
-      const [diff, hasUncommitted] = await Promise.all([
+      const currentBranch = session.remote_branch || session.created_branch;
+      await Promise.all([
+        token && session.base_branch ? gitFetch(cwd, token, session.base_branch).catch(() => {}) : null,
+        token && currentBranch && currentBranch !== session.base_branch
+          ? gitFetch(cwd, token, currentBranch).catch(() => {})
+          : null,
+      ]);
+      const [diff, hasUncommitted, commitsToPush] = await Promise.all([
         gitDiff(cwd, session.base_branch),
         gitHasUncommitted(cwd),
+        gitCommitsToPush(cwd),
       ]);
-      return { diff, hasUncommitted };
+      return { diff, hasUncommitted, commitsToPush };
     } catch (err) {
       return { diff: '', hasUncommitted: false, error: err.message };
     }
@@ -250,6 +258,55 @@ export class SessionsService extends KnexService {
         { pr_status: 'merged' },
         { provider: undefined, user: { id: session.user_id } }
       );
+    return { ok: true };
+  }
+
+  async push(data, params) {
+    const session = params.resolvedSession;
+    if (!session?.worktree_path) throw new BadRequest('Session has no worktree');
+    const cwd = resolveDataDirRelativePath(session.worktree_path);
+    const user = await this.app.service('users').get(session.user_id, {});
+    const token = getEffectiveGithubToken(user);
+    if (!token) throw new BadRequest('No GitHub token configured');
+    let pushedBranch;
+    try {
+      const result = await gitPush(cwd, token);
+      pushedBranch = result.branch;
+      await this.app
+        .service('sessions')
+        .patch(
+          session.id,
+          { remote_branch: pushedBranch, created_branch: pushedBranch },
+          { provider: undefined, user: { id: session.user_id } }
+        );
+    } catch (err) {
+      if (err.rejected) {
+        const conflict = new BadRequest('Push failed due to a conflict');
+        conflict.data = { conflict: true };
+        throw conflict;
+      }
+      throw err;
+    }
+    if (session.label || session.pr_description != null) {
+      const head = pushedBranch || session.remote_branch || session.created_branch;
+      const pr = await upsertPR(token, {
+        repoFullName: session.repo_full_name,
+        prNumber: session.pr_number,
+        title: session.label || session.repo_full_name,
+        body: session.pr_description ?? '',
+        head: session.pr_number ? undefined : head,
+        baseBranch: session.base_branch,
+      });
+      if (!session.pr_number) {
+        await this.app
+          .service('sessions')
+          .patch(
+            session.id,
+            { pr_url: pr.url, pr_number: pr.number, pr_status: 'open' },
+            { provider: undefined, user: { id: session.user_id } }
+          );
+      }
+    }
     return { ok: true };
   }
 
@@ -537,6 +594,7 @@ export function registerSessionsService(app, path = 'sessions') {
       'diff',
       'showDiff',
       'merge',
+      'push',
     ],
   });
   app.service(path).hooks(sessionsHooks);
@@ -567,6 +625,7 @@ export const sessionsHooks = {
     diff: [resolveSessionFromData],
     showDiff: [resolveSessionFromData],
     merge: [resolveSessionFromData],
+    push: [resolveSessionFromData],
     resolvePermission: [requireUser],
   },
   after: {

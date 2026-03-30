@@ -423,6 +423,23 @@ export async function gitPush(worktreePath, token) {
 const MAX_DIFF_BUFFER_SIZE = 5 * 1024 * 1024;
 
 /**
+ * Returns the number of local commits not yet pushed to any remote.
+ * @returns {Promise<number>}
+ */
+export async function gitCommitsToPush(worktreePath) {
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['-C', worktreePath, 'rev-list', '--count', 'HEAD', '--not', '--remotes'],
+      { maxBuffer: 256 }
+    );
+    return parseInt(stdout.trim(), 10) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
  * Returns true if there are uncommitted changes in the worktree.
  * @returns {Promise<boolean>}
  */

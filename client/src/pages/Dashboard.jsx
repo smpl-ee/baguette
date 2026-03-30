@@ -144,7 +144,6 @@ export default function Dashboard() {
     planMode,
     model,
     createNewBranch,
-    autoCreatePR,
     autoPush,
     plugins,
   }) => {
@@ -155,7 +154,6 @@ export default function Dashboard() {
       permission_mode: permissionMode,
       plan_mode: planMode,
       create_new_branch: createNewBranch ?? true,
-      auto_create_pr: autoCreatePR ?? true,
       auto_push: autoPush ?? true,
     };
     if (model) params.model = model;

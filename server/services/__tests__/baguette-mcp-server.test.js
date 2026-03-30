@@ -75,6 +75,7 @@ const DEFAULT_SESSION = {
   repo_full_name: 'owner/repo',
   base_branch: 'main',
   worktree_path: '/tmp/wt',
+  auto_push: 1,
 };
 
 /** Simulates a task that calls onLog/onExit callbacks asynchronously. */
@@ -222,6 +223,15 @@ describe('GitPush', () => {
       expect.anything()
     );
   });
+
+  it('skips push and returns ok message when auto_push is disabled', async () => {
+    const { tools, mockPatch } = buildServer({ auto_push: 0 });
+    const result = parseResult(await callTool(tools, 'GitPush'));
+    expect(result.ok).toBe(true);
+    expect(typeof result.message).toBe('string');
+    expect(gitPush).not.toHaveBeenCalled();
+    expect(mockPatch).not.toHaveBeenCalled();
+  });
 });
 
 describe('PrUpsert', () => {
@@ -242,17 +252,21 @@ describe('PrUpsert', () => {
     );
     expect(mockPatch).toHaveBeenCalledWith(
       1,
+      { label: 'My PR', pr_description: 'Details' },
+      expect.anything()
+    );
+    expect(mockPatch).toHaveBeenCalledWith(
+      1,
       {
         pr_url: 'https://github.com/owner/repo/pull/1',
         pr_number: 1,
         pr_status: 'open',
-        label: 'My PR',
       },
       expect.anything()
     );
   });
 
-  it('updates existing PR without HEAD lookup; only patches label', async () => {
+  it('updates existing PR without HEAD lookup; patches label and description', async () => {
     upsertPR.mockResolvedValue({ url: 'https://github.com/owner/repo/pull/5', number: 5 });
     const { tools, mockPatch } = buildServer({ pr_number: 5 });
     const result = parseResult(
@@ -260,7 +274,11 @@ describe('PrUpsert', () => {
     );
     expect(result.ok).toBe(true);
     expect(execFile).not.toHaveBeenCalled();
-    expect(mockPatch).toHaveBeenCalledWith(1, { label: 'Updated' }, expect.anything());
+    expect(mockPatch).toHaveBeenCalledWith(
+      1,
+      { label: 'Updated', pr_description: 'Updated body' },
+      expect.anything()
+    );
   });
 
   it('fails and links session when an open PR already exists for HEAD', async () => {
@@ -283,6 +301,11 @@ describe('PrUpsert', () => {
     expect(upsertPR).not.toHaveBeenCalled();
     expect(mockPatch).toHaveBeenCalledWith(
       1,
+      { label: 'New title', pr_description: 'Body' },
+      expect.anything()
+    );
+    expect(mockPatch).toHaveBeenCalledWith(
+      1,
       {
         pr_url: 'https://github.com/owner/repo/pull/7',
         pr_number: 7,
@@ -291,6 +314,21 @@ describe('PrUpsert', () => {
       },
       expect.anything()
     );
+  });
+
+  it('persists label and description but skips GitHub when auto_push is disabled', async () => {
+    const { tools, mockPatch } = buildServer({ pr_number: null, auto_push: 0 });
+    const result = parseResult(
+      await callTool(tools, 'PrUpsert', { title: 'My PR', description: 'Details' })
+    );
+    expect(result.ok).toBe(true);
+    expect(upsertPR).not.toHaveBeenCalled();
+    expect(mockPatch).toHaveBeenCalledWith(
+      1,
+      { label: 'My PR', pr_description: 'Details' },
+      expect.anything()
+    );
+    expect(mockPatch).toHaveBeenCalledTimes(1);
   });
 });
 

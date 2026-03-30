@@ -3,7 +3,6 @@ import {
   AlertCircle,
   GitPullRequest,
   GitMerge,
-  GitCommitHorizontal,
   CircleCheck,
   MessageSquare,
   GitCompare,
@@ -11,6 +10,7 @@ import {
   ChevronRight,
   ChevronDown,
   Terminal,
+  Upload,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { messagesService, sessionsService } from '../../feathers.js';
@@ -66,8 +66,9 @@ export default function ChatView({
   onModeChange,
   onViewChange,
   readonly,
-  hasDiff,
   hasUncommitted,
+  commitsToPush,
+  onCommitsPushed,
 }) {
   const persistentState = usePersistentState(
     session?.id ? `session-chat-${session.id}` : undefined
@@ -81,6 +82,7 @@ export default function ChatView({
   const [showMergeModal, setShowMergeModal] = useState(false);
   const [merging, setMerging] = useState(false);
   const [mergeError, setMergeError] = useState(null);
+  const [pushing, setPushing] = useState(false);
 
   const isRunning = session?.status === 'running';
 
@@ -101,6 +103,24 @@ export default function ChatView({
       type: 'user',
       message_json: JSON.stringify({ type: 'user', message: { role: 'user', content: text } }),
     });
+  };
+
+  const handlePush = async () => {
+    if (!session?.id || pushing) return;
+    setPushing(true);
+    try {
+      await sessionsService.push(session.id);
+      onCommitsPushed?.();
+      toast.success('Pushed successfully');
+    } catch (err) {
+      if (err.data?.conflict) {
+        toastError('Push failed — use Git Sync to resolve conflicts first', err);
+      } else {
+        toastError('Push failed', err);
+      }
+    } finally {
+      setPushing(false);
+    }
   };
 
   const handleMerge = async () => {
@@ -284,44 +304,27 @@ export default function ChatView({
               </button>
             </div>
           )}
-          {!readonly && session?.status === 'completed' && hasUncommitted === true && (
-            <div className="flex gap-2 flex-wrap py-2">
-              <Tooltip content="Commit any uncommitted changes and push to the remote branch.">
+          {!readonly && session?.status === 'completed' && session?.pr_status !== 'merged' && (commitsToPush > 0 || hasUncommitted) && (
+            <div className="flex gap-2 flex-wrap items-center py-2">
+              <Tooltip content="Push commits to GitHub and create/update the PR">
                 <button
                   type="button"
-                  onClick={() =>
-                    handleQuickSend(
-                      'Please commit all uncommitted changes with a concise, descriptive commit message and push to the remote branch using the GitPush MCP tool.'
-                    )
-                  }
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-xs text-zinc-300 transition-colors"
+                  onClick={handlePush}
+                  disabled={pushing}
+                  className="relative flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 border border-amber-500 rounded-lg text-xs text-white transition-colors"
                 >
-                  <GitCommitHorizontal className="w-3.5 h-3.5" />
-                  Git Push
-                </button>
-              </Tooltip>
-            </div>
-          )}
-          {!readonly && !session?.pr_number && session?.status === 'completed' && hasDiff !== false && (
-            <div className="flex gap-2 flex-wrap py-2">
-              <Tooltip content="Ask the agent to create a pull request for this session.">
-                <button
-                  type="button"
-                  onClick={() =>
-                    handleQuickSend(
-                      'Please create a pull request for this work using the PrUpsert MCP tool. Write an appropriate title and description summarizing the changes made.'
-                    )
-                  }
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 border border-amber-500 rounded-lg text-xs text-white transition-colors"
-                >
-                  <GitPullRequest className="w-3.5 h-3.5" />
-                  Create PR
+                  <Upload className="w-3.5 h-3.5" />
+                  Push
+                  {commitsToPush > 0 && (
+                    <span className="ml-0.5 flex items-center justify-center min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-white text-amber-700 text-[10px] font-bold leading-none">
+                      {commitsToPush}
+                    </span>
+                  )}
                 </button>
               </Tooltip>
             </div>
           )}
           {!readonly &&
-            session?.pr_number &&
             session?.status === 'completed' &&
             session?.pr_status !== 'merged' && (
               <div className="flex gap-2 flex-wrap py-2">
