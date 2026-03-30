@@ -27,6 +27,8 @@ reposService.methods(
 export const secretsService = app.service('secrets');
 export const usersService = app.service('users');
 usersService.methods('approve', 'reject');
+export const pluginsService = app.service('admin/plugins');
+pluginsService.methods('find', 'create', 'remove', 'refresh');
 
 export function getSocket() {
   return socket;

@@ -1,5 +1,16 @@
 # Baguette – Claude Code Notes
 
+## API routes: prefer Feathers services over Express routes
+
+New API endpoints should be implemented as **Feathers services** in `server/services/feathers/`, not as Express routers in `server/routes/`. Feathers services integrate with auth hooks (`requireUser`), the socket.io transport, and the client-side `feathers.js` service registry automatically.
+
+- Add custom actions (beyond CRUD) as **custom methods** on the service class and declare them in `app.use(path, service, { methods: [...] })`.
+- Register the service in `server/services/feathers/index.js` via `registerFeathersServices`.
+- Export the client-side service from `client/src/feathers.js` and call `.methods(...)` for any custom methods.
+- Use `apiFetch` only for non-Feathers endpoints (e.g. `server/routes/settings.js`, auth routes).
+
+**DB writes belong in the Feathers service, not in helper/utility modules.** External service modules (e.g. `server/services/plugins-service.js`) should contain only pure logic and file-system/network operations. The Feathers service method is responsible for reading from and writing to the DB before/after calling those helpers. This keeps the DB boundary clear and ensures auth hooks run around every DB mutation.
+
 ## SQLite migrations (Knex + `better-sqlite3`)
 
 Baguette uses SQLite only. Knex’s SQLite dialect does **not** implement most `ALTER TABLE` variants natively: it often **rebuilds** a table by creating a temp table, copying rows, then running **`DROP TABLE "<name>"`**, then renaming the temp table back. If another table has a foreign key **to** that table, `DROP TABLE` fails with `FOREIGN KEY constraint failed` (for example dropping or altering `users` while `sessions`, `usage`, or `user_repos` reference `users`).

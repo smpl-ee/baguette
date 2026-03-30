@@ -29,9 +29,13 @@ function commandsToAllowedTools(commands) {
 
 async function buildQueryOptions(
   sessionRow,
-  { canUseTool, env, model, abortController, allowedTools, mcpServer }
+  { canUseTool, env, model, abortController, allowedTools, mcpServer, pluginRows }
 ) {
   const absoluteWorktreePath = resolveDataDirRelativePath(sessionRow.worktree_path) || '';
+  const pluginConfigs = (pluginRows || []).map((p) => ({
+    type: 'local',
+    path: resolveDataDirRelativePath(p.local_path),
+  }));
   return {
     cwd: absoluteWorktreePath,
     // For bypassPermissions, use acceptEdits as the SDK-level mode — full bypass is handled
@@ -55,6 +59,7 @@ async function buildQueryOptions(
     abortController,
     mcpServers: { baguette: mcpServer },
     ...(allowedTools?.length ? { allowedTools } : {}),
+    ...(pluginConfigs.length ? { plugins: pluginConfigs } : {}),
   };
 }
 
@@ -355,6 +360,20 @@ export class ClaudeAgentService {
 
     const claudeEnv = await this.app.service('sessions').getClaudeEnv(sessionId);
     const mcpServer = buildBaguetteMcpServer(sessionId, sessionRow.user_id, sessionRow, this.app);
+
+    // Resolve installed plugins selected for this session
+    let pluginRows = [];
+    if (!isReviewer && sessionRow.plugins) {
+      try {
+        const pluginIds = JSON.parse(sessionRow.plugins);
+        if (Array.isArray(pluginIds) && pluginIds.length > 0) {
+          pluginRows = await this.app.get('db')('plugins').whereIn('id', pluginIds);
+        }
+      } catch {
+        // malformed plugins JSON — ignore
+      }
+    }
+
     const queryOptions = isReviewer
       ? await buildReviewerQueryOptions(sessionRow, {
           canUseTool,
@@ -370,6 +389,7 @@ export class ClaudeAgentService {
           abortController,
           allowedTools,
           mcpServer,
+          pluginRows,
         });
 
     const queryInstance = query({ prompt: channel, options: queryOptions });

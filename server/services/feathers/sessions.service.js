@@ -506,6 +506,16 @@ function extractInitialFiles(context) {
   return context;
 }
 
+function serializePlugins(context) {
+  const plugins = context.data.plugins;
+  if (Array.isArray(plugins)) {
+    context.data.plugins = JSON.stringify(plugins);
+  } else if (plugins == null) {
+    delete context.data.plugins;
+  }
+  return context;
+}
+
 export function registerSessionsService(app, path = 'sessions') {
   const options = {
     Model: app.get('db'),
@@ -550,7 +560,7 @@ export const sessionsHooks = {
   before: {
     all: [requireUser, scopeByUser],
     find: [applyGroupSort],
-    create: [ensureShortId, prepareSessionEnvironment, extractInitialFiles],
+    create: [ensureShortId, prepareSessionEnvironment, serializePlugins, extractInitialFiles],
     patch: [requireOwnSession],
     stop: [resolveSessionFromData],
     commands: [resolveSessionFromData],

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Github } from 'lucide-react';
 import { apiFetch } from '../api.js';
-import { usersService } from '../feathers.js';
+import { usersService, pluginsService } from '../feathers.js';
 import { useAuth } from '../hooks/useAuth.jsx';
 import { useRepoContext } from '../context/RepoContext.jsx';
 import { useGetBranches } from '../hooks/useGetBranches.js';
@@ -31,6 +31,8 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
   const [permissionMode, setPermissionMode] = persistentState.useState('permissionMode', 'default');
   const [model, setModel] = persistentState.useState('model', '');
   const [models, setModels] = useState([]);
+  const [selectedPlugins, setSelectedPlugins] = persistentState.useState('plugins', []);
+  const [availablePlugins, setAvailablePlugins] = useState([]);
   const [files, setFiles] = useState([]);
   const [fileError, setFileError] = useState(null);
   const initialPromptRef = useRef(null);
@@ -78,6 +80,13 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
+  useEffect(() => {
+    pluginsService
+      .find()
+      .then((d) => setAvailablePlugins(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  }, []);
+
   const canSubmit = !loading && repoFullName && branch && initialPrompt;
 
   useEffect(() => {
@@ -108,6 +117,7 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
       createNewBranch,
       autoCreatePR,
       autoPush,
+      plugins: selectedPlugins.length > 0 ? selectedPlugins : undefined,
     });
     clearForm();
   };
@@ -126,6 +136,7 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
       createNewBranch,
       autoCreatePR,
       autoPush,
+      plugins: selectedPlugins.length > 0 ? selectedPlugins : undefined,
     });
     clearForm();
   };
@@ -143,8 +154,9 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
           planMode: false,
           model: model || undefined,
           createNewBranch,
-      autoCreatePR,
-      autoPush,
+          autoCreatePR,
+          autoPush,
+          plugins: selectedPlugins.length > 0 ? selectedPlugins : undefined,
         });
         clearForm();
       }
@@ -313,9 +325,7 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-1">
-                Permission Mode
-              </label>
+              <label className="block text-sm font-medium text-zinc-300 mb-1">Permission Mode</label>
               <select
                 value={permissionMode}
                 onChange={(e) => setPermissionMode(e.target.value)}
@@ -326,6 +336,40 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
                 <option value="bypassPermissions">Bypass All Permissions</option>
               </select>
             </div>
+
+            {/* Plugins */}
+            {availablePlugins.length > 0 && (
+              <div className="sm:col-span-2">
+                <label className="block text-sm font-medium text-zinc-300 mb-1.5">Plugins</label>
+                <div className="space-y-1.5">
+                  {availablePlugins.map((plugin) => (
+                    <label
+                      key={plugin.id}
+                      className="flex cursor-pointer items-start gap-2 rounded-md border border-zinc-700/80 bg-zinc-800/40 px-3 py-2"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedPlugins.includes(plugin.id)}
+                        onChange={(e) =>
+                          setSelectedPlugins((prev) =>
+                            e.target.checked
+                              ? [...prev, plugin.id]
+                              : prev.filter((id) => id !== plugin.id)
+                          )
+                        }
+                        className="mt-0.5 rounded border-zinc-600 text-amber-500 focus:ring-amber-500/50"
+                      />
+                      <span className="text-sm text-zinc-300 leading-tight">
+                        <span className="font-medium text-zinc-200">{plugin.name}</span>
+                        <span className="block text-xs font-normal text-zinc-500 mt-0.5">
+                          {plugin.marketplace_repo} · {plugin.plugin_path}
+                        </span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

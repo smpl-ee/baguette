@@ -8,6 +8,7 @@ import { registerUsersService } from './users.service.js';
 import { registerReposService } from './repos.service.js';
 import { registerUserReposService } from './user-repos.service.js';
 import { registerClaudeAgentService } from './claude-agent.service.js';
+import { registerPluginsService } from './plugins.service.js';
 
 /**
  * Register Feathers services (sessions, messages, tasks), their hooks, and channel publishing.
@@ -24,6 +25,7 @@ export function registerFeathersServices(app) {
   registerUsersService(app);
   registerReposService(app);
   registerUserReposService(app);
+  registerPluginsService(app);
 
   app.service('sessions').publish((data) => {
     return app.channel(`user/${data.user_id}`);

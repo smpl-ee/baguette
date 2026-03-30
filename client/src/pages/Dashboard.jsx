@@ -146,6 +146,7 @@ export default function Dashboard() {
     createNewBranch,
     autoCreatePR,
     autoPush,
+    plugins,
   }) => {
     const params = {
       repo_full_name: repoFullName,
@@ -158,6 +159,7 @@ export default function Dashboard() {
       auto_push: autoPush ?? true,
     };
     if (model) params.model = model;
+    if (plugins?.length) params.plugins = plugins;
     if (files?.length) {
       try {
         params.initial_files = await Promise.all(files.map(fileToContentBlock));
