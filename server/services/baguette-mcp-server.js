@@ -24,11 +24,20 @@ import { DOCKER_COMPOSE_PATH, resolveDataDirRelativePath } from '../config.js';
 const execFileAsync = promisify(execFile);
 
 function ok(data) {
-  return { content: [{ type: 'text', text: JSON.stringify({ ok: true, ...data }) }] };
+  // Pretty-print so spilled tool-result files are multi-line; line-based Read offset/limit can paginate.
+  return { content: [{ type: 'text', text: JSON.stringify({ ok: true, ...data }, null, 2) }] };
 }
 
 function fail(message) {
-  return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: message }) }] };
+  return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: message }, null, 2) }] };
+}
+
+/** Split stream text into lines for JSON arrays (drops trailing empty segment from final newline). */
+function streamToLines(text) {
+  if (text === '' || text == null) return [];
+  const lines = text.split(/\r?\n/);
+  if (lines.length && lines[lines.length - 1] === '') lines.pop();
+  return lines;
 }
 
 /**
@@ -405,7 +414,7 @@ export function buildBaguetteMcpServer(sessionId, userId, sessionRow, app) {
 
       tool(
         'RunProjectCommand',
-        'Run a project command by its label from .baguette.yaml (e.g. "Run tests"). Always use this instead of running scripts directly. Pass args to scope execution: a file path, a test name pattern, or any flag the underlying runner supports (e.g. ["src/foo.test.js"], ["--grep", "my test"], ["-k", "my_test"]).',
+        'Run a project command by its label from .baguette.yaml (e.g. "Run tests"). Always use this instead of running scripts directly. Pass args to scope execution: a file path, a test name pattern, or any flag the underlying runner supports (e.g. ["src/foo.test.js"], ["--grep", "my test"], ["-k", "my_test"]). Output is returned as stdoutLines/stderrLines (one terminal line per JSON line).',
         {
           label: z.string().describe('Command label exactly as returned by ListProjectCommands'),
           args: z
@@ -448,7 +457,14 @@ export function buildBaguetteMcpServer(sessionId, userId, sessionRow, app) {
                     if (stream === 'stdout') stdout += data;
                     else stderr += data;
                   },
-                  onExit: (id, exitCode) => resolve(ok({ exitCode, stdout, stderr })),
+                  onExit: (id, exitCode) =>
+                    resolve(
+                      ok({
+                        exitCode,
+                        stdoutLines: streamToLines(stdout),
+                        stderrLines: streamToLines(stderr),
+                      })
+                    ),
                 },
                 { user: { id: userId } }
               )

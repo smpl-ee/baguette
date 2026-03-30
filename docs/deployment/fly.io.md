@@ -14,7 +14,7 @@ Fly.io machines are **Firecracker VMs**, not containers running on a shared host
 
 - [flyctl](https://fly.io/docs/hands-on/install-flyctl/) installed and authenticated (`fly auth login`)
 - A [GitHub OAuth App](https://github.com/settings/developers)
-- An Anthropic API key or a Claude plan
+- An Anthropic API key
 
 ## 1. Configure fly.toml
 
@@ -106,16 +106,6 @@ fly deploy
 
 On first boot the entrypoint starts `dockerd`, runs database migrations, then launches the Node server. The health check at `/up` gates traffic until the server is ready.
 
-## 8. Authenticate Claude
-
-If you're using a Claude plan (not an API key), SSH into the machine after the first deploy and complete the interactive login:
-
-```bash
-fly ssh console
-claude
-```
-
-The auth token is written to `/data/.claude` which lives on the persistent volume, so subsequent deploys and machine restarts don't require re-authentication.
 
 ## Cold starts in practice
 

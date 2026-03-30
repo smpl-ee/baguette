@@ -377,8 +377,8 @@ describe('RunProjectCommand', () => {
     const result = parseResult(await callTool(tools, 'RunProjectCommand', { label: 'Run tests' }));
     expect(result.ok).toBe(true);
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe('all tests passed\n');
-    expect(result.stderr).toBe('');
+    expect(result.stdoutLines).toEqual(['all tests passed']);
+    expect(result.stderrLines).toEqual([]);
     expect(mockCreate).toHaveBeenCalledWith(
       expect.objectContaining({ command: 'npm test' }),
       expect.anything()
@@ -396,7 +396,24 @@ describe('RunProjectCommand', () => {
     const result = parseResult(await callTool(tools, 'RunProjectCommand', { label: 'Run tests' }));
     expect(result.ok).toBe(true);
     expect(result.exitCode).toBe(1);
-    expect(result.stderr).toBe('Test failed\n');
+    expect(result.stderrLines).toEqual(['Test failed']);
+  });
+
+  it('returns full stdout as lines without truncation', async () => {
+    const huge = `${'x'.repeat(90_000)}\nLAST_LINE\n`;
+    loadBaguetteConfig.mockResolvedValue({
+      session: { commands: [{ label: 'Run tests', run: 'npm test' }] },
+    });
+    const { tools } = buildServer(
+      {},
+      { tasksCreate: makeTaskCreate({ exitCode: 0, stdout: huge }) }
+    );
+    const result = parseResult(await callTool(tools, 'RunProjectCommand', { label: 'Run tests' }));
+    expect(result.ok).toBe(true);
+    const joined = result.stdoutLines.join('\n');
+    expect(joined).toBe(huge.replace(/\n$/, ''));
+    expect(joined).toContain('LAST_LINE');
+    expect(joined.length).toBeGreaterThan(90_000);
   });
 
   it('appends a single file path arg', async () => {

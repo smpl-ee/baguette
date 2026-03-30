@@ -181,8 +181,12 @@ function CommandBlock({ baguetteOp, block }) {
   }
 
   const exitCode = parsed?.exitCode;
-  const stdout = parsed?.stdout ?? '';
-  const stderr = parsed?.stderr ?? '';
+  const stdout = Array.isArray(parsed?.stdoutLines)
+    ? parsed.stdoutLines.join('\n')
+    : (parsed?.stdout ?? '');
+  const stderr = Array.isArray(parsed?.stderrLines)
+    ? parsed.stderrLines.join('\n')
+    : (parsed?.stderr ?? '');
   const ok = parsed?.ok;
   const stdoutHtml = useMemo(() => (stdout ? ansiToHtml(stdout) : ''), [stdout]);
   const stderrHtml = useMemo(() => (stderr ? ansiToHtml(stderr) : ''), [stderr]);

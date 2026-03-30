@@ -42,7 +42,7 @@ Baguette is a self-hosted orchestrator for [Claude Code](https://platform.claude
 
 - Node.js 20+
 - A [GitHub OAuth App](https://github.com/settings/developers)
-- An [Anthropic API key](https://console.anthropic.com/) or a [Claude plan](https://claude.ai/)
+- An [Anthropic API key](https://console.anthropic.com/)
 
 ### Setup
 
@@ -81,7 +81,7 @@ npm run migrate
 curl -fsSL https://claude.ai/install.sh | bash
 ```
 
-You can either authenticate with Claude Code directly or set an Anthropic Key in **Settings -> Agent**.
+6. Sign-in with your Github account and enter your Anthropic API Key in **Settings** > **Agent** page.
 
 ### Run
 

@@ -22,14 +22,9 @@ Copy the private key (`cat /home/ubuntu/.ssh/id_ed25519`) — it becomes the `SS
 **Create the data directory** that Baguette mounts at runtime:
 
 ```bash
-mkdir -p /home/ubuntu/baguette_storage   # → /data  (SQLite DB, repos, worktrees, Claude auth)
+mkdir -p /home/ubuntu/baguette_storage   # → /data  (SQLite DB, repos, worktrees)
 ```
 
-> **Using a Claude plan instead of an API key?** After the first deploy, exec into the container and run `claude` once to complete the login flow. The auth is persisted in `/data/.claude` so subsequent deploys don't require it again:
->
-> ```bash
-> docker exec -it baguette-web-1 claude
-> ```
 
 ## 2. Wildcard TLS with acme.sh
 

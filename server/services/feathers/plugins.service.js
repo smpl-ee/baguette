@@ -11,7 +11,7 @@ import { getEffectiveGithubToken } from '../agent-settings.js';
 import { requireUser } from './hooks.js';
 
 class PluginsService extends KnexService {
-  async find(params) {
+  async find(_params) {
     return this.options.Model('plugins').select().orderBy([
       { column: 'marketplace_repo', order: 'asc' },
       { column: 'plugin_path', order: 'asc' },
@@ -61,7 +61,7 @@ class PluginsService extends KnexService {
     }
   }
 
-  async remove(id, params) {
+  async remove(id, _params) {
     const db = this.options.Model;
     const plugin = await db('plugins').where({ id }).first();
     if (!plugin) throw new NotFound('Plugin not found');
