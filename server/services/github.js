@@ -209,7 +209,8 @@ export async function createWorktree(repo, branch, worktreeId, token, opts = {})
   const worktreePath = path.join(REPOS_DIR, repo.stripped_name, 'sessions', worktreeId);
   await fs.promises.mkdir(path.dirname(worktreePath), { recursive: true });
 
-  await gitWithToken(token, ['fetch', 'origin', `${branch}:${branch}`, '--prune'], {
+  // '+' forces the bare repo's branch ref to match origin even after force-push or diverged cache
+  await gitWithToken(token, ['fetch', 'origin', `+${branch}:${branch}`, '--prune'], {
     cwd: barePath,
     stdio: 'pipe',
   });
@@ -218,7 +219,7 @@ export async function createWorktree(repo, branch, worktreeId, token, opts = {})
   if (baseBranch && baseBranch !== branch) {
     await gitWithToken(
       token,
-      ['fetch', 'origin', `${baseBranch}:refs/remotes/origin/${baseBranch}`],
+      ['fetch', 'origin', `+${baseBranch}:refs/remotes/origin/${baseBranch}`],
       { cwd: barePath, stdio: 'pipe' }
     );
   }
@@ -375,7 +376,7 @@ export async function gitPull(worktreePath, remoteBranch, token) {
 
 export async function gitFetch(worktreePath, token, branch) {
   const args = branch
-    ? ['fetch', 'origin', `${branch}:refs/remotes/origin/${branch}`]
+    ? ['fetch', 'origin', `+${branch}:refs/remotes/origin/${branch}`]
     : ['fetch', '--all'];
   const { stdout: output } = await gitWithToken(token, args, {
     cwd: worktreePath,
