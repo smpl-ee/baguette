@@ -362,7 +362,7 @@ export async function gitPull(worktreePath, remoteBranch, token) {
     return { ok: true, message: 'Remote branch not found, skipping pull' };
   }
 
-  await gitWithToken(token, ['pull', 'origin', remoteBranch], {
+  await gitWithToken(token, ['pull', '--no-rebase', 'origin', remoteBranch], {
     cwd: worktreePath,
     stdio: 'pipe',
   });
