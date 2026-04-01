@@ -24,6 +24,19 @@ import ApprovalInline from '../../components/ApprovalInline.jsx';
 import MergeConfirmModal from '../../components/MergeConfirmModal.jsx';
 import Tooltip from '../../components/Tooltip.jsx';
 
+/** "Check comments" quick message for builder sessions — must stay aligned with `## Responding to PR feedback` in `server/prompts/build-prompt.md` (injected via session prompt; do not duplicate that section here). */
+const CHECK_COMMENTS_PROMPT_BUILDER =
+  'Address open PR feedback by following the **Responding to PR feedback** section in your system instructions.';
+
+/** Reviewer sessions use `reviewer-prompt.md`, not the build prompt; nudge PrComments + review workflow only. */
+const CHECK_COMMENTS_PROMPT_REVIEWER =
+  'Call PrComments to load existing PR conversation and inline review comments, then summarize and continue per your review workflow.';
+
+const CHECK_COMMENTS_TOOLTIP_BUILDER =
+  'Check review comments and fix problems.';
+const CHECK_COMMENTS_TOOLTIP_REVIEWER =
+  'Check review comments.';
+
 function SystemPromptEntry({ content }) {
   const [expanded, setExpanded] = useState(false);
   return (
@@ -85,6 +98,7 @@ export default function ChatView({
   const [pushing, setPushing] = useState(false);
 
   const isRunning = session?.status === 'running';
+  const isReviewerSession = session?.agent_type === 'reviewer';
 
   const handleStop = async () => {
     if (!session?.id || stopping) return;
@@ -366,12 +380,16 @@ export default function ChatView({
                     Check CI
                   </button>
                 </Tooltip>
-                <Tooltip content="Check all unread comments and fix problems.">
+                <Tooltip
+                  content={
+                    isReviewerSession ? CHECK_COMMENTS_TOOLTIP_REVIEWER : CHECK_COMMENTS_TOOLTIP_BUILDER
+                  }
+                >
                   <button
                     type="button"
                     onClick={() =>
                       handleQuickSend(
-                        'Please check for unread PR comments using PrComments. Address and fix any open issues.'
+                        isReviewerSession ? CHECK_COMMENTS_PROMPT_REVIEWER : CHECK_COMMENTS_PROMPT_BUILDER
                       )
                     }
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-xs text-zinc-300 transition-colors"

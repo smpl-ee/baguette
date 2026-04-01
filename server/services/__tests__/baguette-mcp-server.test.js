@@ -502,7 +502,7 @@ describe('PrComments', () => {
   });
 
   it('calls getPRComments and returns result', async () => {
-    getPRComments.mockResolvedValue({ comments: [], reviewComments: [] });
+    getPRComments.mockResolvedValue({ issueComments: [], reviewComments: [] });
     const { tools } = buildServer({ pr_number: 42 });
     const result = parseResult(await callTool(tools, 'PrComments'));
     expect(result.ok).toBe(true);

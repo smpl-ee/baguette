@@ -222,7 +222,7 @@ export function buildBaguetteMcpServer(sessionId, userId, sessionRow, app) {
 
       tool(
         'PrComments',
-        'List all existing PR comments and inline review comments.',
+        'List PR conversation comments and inline review comments on the diff.',
         {},
         async () => {
           const session = await getSession();
@@ -247,7 +247,7 @@ export function buildBaguetteMcpServer(sessionId, userId, sessionRow, app) {
           commentId: z.number().int().describe('Comment ID from PrComments'),
           commentType: z
             .enum(['issue', 'review'])
-            .describe('"issue" for general PR comments, "review" for inline review comments'),
+            .describe('"issue" for conversation thread comments, "review" for inline review comments'),
         },
         async ({ commentId, commentType }) => {
           const session = await getSession();

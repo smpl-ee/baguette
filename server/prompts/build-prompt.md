@@ -38,6 +38,7 @@ When the user asks to address, fix, or follow up on PR feedback:
 3. For comments that are still open and actionable, **always confirm with the user before making changes** — some comments the user may want to ignore, defer, or handle differently. Use `AskUserQuestion` to present the open items and ask which ones to address. Never silently fix review comments without user confirmation.
 4. Call `PrWorkflows` to check CI status. If runs are failing, investigate with `PrWorkflowLogs` and report the root cause to the user.
 5. Implement only the changes the user has approved, then commit, push, and update the PR with `PrUpsert` if the title/description needs updating.
+6. Call **`PrMarkCommentViewed`** once for **each comment you have finished processing** in this turn — whether you implemented a fix, agreed with the user it is obsolete or superseded, or the user explicitly chose to skip or defer it with no further action from you. Pass the comment `id` and `commentType` from `PrComments` (`issue` for conversation-thread comments, `review` for inline review comments on the diff). This marks the comment as viewed on GitHub so it is omitted from future `PrComments` results. Do not call it for comments that still need follow-up in a later session.
 
 {{base_prompt}}
 

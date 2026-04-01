@@ -549,7 +549,12 @@ export async function getOpenPRByNumber(token, repoFullName, prNumber) {
 }
 
 /**
- * Lists issue comments and inline review comments for a PR.
+ * Lists comments on a PR: the conversation thread plus inline review comments on the diff.
+ *
+ * GitHub stores every pull request as an issue (same numeric id). Comments on the main PR
+ * “Conversation” tab are therefore **issue comments** (`/issues/{n}/comments`), not pull
+ * comments. Inline feedback on files uses the pull review comments API (`/pulls/{n}/comments`).
+ *
  * @returns {{ issueComments: object[], reviewComments: object[] }}
  */
 export async function getPRComments(token, repoFullName, prNumber) {
@@ -576,6 +581,7 @@ export async function getPRComments(token, repoFullName, prNumber) {
   });
 
   const [issueRes, reviewRes] = await Promise.all([
+    // PR conversation thread — same resource as issue comments because PR #n === issue #n
     fetch(`https://api.github.com/repos/${repoFullName}/issues/${prNumber}/comments?per_page=100`, {
       headers,
     }),
