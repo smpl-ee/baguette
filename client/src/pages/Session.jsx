@@ -11,6 +11,7 @@ import {
   MessageSquare,
   ScrollText,
   GitBranch,
+  Copy,
   Archive,
   PanelLeft,
 } from 'lucide-react';
@@ -545,6 +546,16 @@ export default function Session() {
                   <span className="flex min-w-0 items-center gap-1 overflow-hidden text-zinc-500">
                     <GitBranch className="w-3 h-3 shrink-0" />
                     <span className="truncate">{session.created_branch}</span>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(session.created_branch);
+                        toast.success('Branch name copied');
+                      }}
+                      className="shrink-0 text-zinc-600 hover:text-zinc-400"
+                      title="Copy branch name"
+                    >
+                      <Copy className="w-3 h-3" />
+                    </button>
                   </span>
                 )}
                 {session.preview_url && (

@@ -7,7 +7,6 @@ import {
   getEffectiveGithubToken,
   getAllowedCommandsFromUser,
 } from '../agent-settings.js';
-import { getModelId } from '../anthropic-models.js';
 import { getClaudeEnv } from '../session-env.js';
 import { buildBaguetteMcpServer } from '../baguette-mcp-server.js';
 import { createMessageChannel } from '../message-channel.js';
@@ -618,7 +617,7 @@ Task: ${initialPrompt}`;
     const env = await getClaudeEnv(this.app, user.id, repoFullName);
     for await (const message of query({
       prompt,
-      options: { model: getModelId('haiku'), env },
+      options: { model: 'haiku', env },
     })) {
       if (message.type === 'result' && message.subtype === 'success' && !message.is_error) {
         const text = (message.result || '').trim();

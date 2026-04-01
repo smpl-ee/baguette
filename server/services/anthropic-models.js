@@ -1,16 +1,30 @@
-const MODELS = [
-  { id: '', display_name: 'Default' },
-  { id: 'claude-opus-4-6', display_name: 'Claude Opus 4.6', model: 'opus' },
-  { id: 'claude-sonnet-4-6', display_name: 'Claude Sonnet 4.6', model: 'sonnet' },
-  { id: 'claude-haiku-4-5', display_name: 'Claude Haiku 4.5', model: 'haiku' },
-];
+import { query } from '@anthropic-ai/claude-agent-sdk';
+import * as cache from '../lib/cache.js';
+
+const MODELS_CACHE_KEY = 'anthropic-models';
+const MODELS_CACHE_TTL = 24 * 60 * 60; // 24 hours
+
+// Static fallback / alias map used by getModelId()
+const MODEL_ALIASES = {
+  opus: 'claude-opus-4-6',
+  sonnet: 'claude-sonnet-4-6',
+  haiku: 'claude-haiku-4-5',
+};
 
 export async function listModels() {
-  return MODELS;
-}
-
-export function getModelId(model) {
-  const entry = MODELS.find((m) => m.model === model);
-  if (!entry) throw new Error(`Unknown model: ${model}`);
-  return entry.id;
+  return cache.fetch(MODELS_CACHE_KEY, MODELS_CACHE_TTL, async () => {
+    const q = query({ prompt: '' });
+    try {
+      const sdkModels = await q.supportedModels();
+      return [
+        ...sdkModels.map((m) => {
+          // Description always start with Name X.Y, let's try to extract the name and version 
+          const displayName = m.description.match(/^([\w\s]+)([\d.]+)/)?.[0] || m.displayName;
+          return { id: m.value, display_name: displayName, description: m.description };
+        }),
+      ];
+    } finally {
+      q.close();
+    }
+  });
 }
