@@ -16,7 +16,7 @@ import { NotFound } from '@feathersjs/errors';
 import { createTestDb } from '../../test-utils/db.js';
 import { registerSessionsService } from '../feathers/sessions.service.js';
 import { registerMessagesService } from '../feathers/messages.service.js';
-import { createWorktree, getOpenPR } from '../github.js';
+import { createWorktree, getOpenPR, getPRStatus } from '../github.js';
 
 // ── Module-level mocks ────────────────────────────────────────────────────────
 
@@ -49,6 +49,7 @@ vi.mock('../github.js', () => ({
   createWorktree: vi.fn().mockResolvedValue({ worktreePath: '/tmp/test-worktree' }),
   getOpenPRByNumber: vi.fn(),
   getOpenPR: vi.fn().mockResolvedValue(null),
+  getPRStatus: vi.fn().mockResolvedValue('open'),
 }));
 
 vi.mock('../baguette-config.js', async (importOriginal) => {
@@ -69,6 +70,7 @@ vi.mock('../session-prompt.js', () => ({
 const params = (user) => ({ provider: 'rest', user });
 
 const deleteSessionTasks = vi.fn();
+const usersServiceGet = vi.fn().mockResolvedValue({ id: 1, github_token: 'test-token' });
 
 function makeApp(db) {
   const app = feathers();
@@ -92,6 +94,7 @@ function makeApp(db) {
       ],
     }
   );
+  app.use('users', { get: usersServiceGet }, { methods: ['get'] });
   registerSessionsService(app);
   registerMessagesService(app);
   return app;
@@ -476,6 +479,54 @@ describe('Sessions service - find, get, create', (hooks) => {
       await expect(app.service('sessions').get(sessId1, { provider: 'rest' })).rejects.toThrow(
         'Not authenticated'
       );
+    });
+
+    it('triggers a background PR status refresh when session has a pr_number', async () => {
+      await db('sessions')
+        .where({ id: sessId1 })
+        .update({ pr_number: 7, pr_status: 'open', repo_full_name: 'test/repo' });
+      getPRStatus.mockResolvedValueOnce('closed');
+
+      await app.service('sessions').get(sessId1, params({ id: userId1 }));
+
+      // Wait for the background promise to settle
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(getPRStatus).toHaveBeenCalledWith('test-token', 'test/repo', 7);
+      const row = await db('sessions').where({ id: sessId1 }).first();
+      expect(row.pr_status).toBe('closed');
+    });
+
+    it('does not patch when PR status has not changed', async () => {
+      await db('sessions')
+        .where({ id: sessId1 })
+        .update({ pr_number: 7, pr_status: 'open', repo_full_name: 'test/repo' });
+      getPRStatus.mockResolvedValueOnce('open');
+
+      await app.service('sessions').get(sessId1, params({ id: userId1 }));
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(getPRStatus).toHaveBeenCalled();
+      const row = await db('sessions').where({ id: sessId1 }).first();
+      expect(row.pr_status).toBe('open');
+    });
+
+    it('skips PR status refresh when pr_number is null', async () => {
+      await app.service('sessions').get(sessId1, params({ id: userId1 }));
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(getPRStatus).not.toHaveBeenCalled();
+    });
+
+    it('skips PR status refresh when pr_status is already merged', async () => {
+      await db('sessions')
+        .where({ id: sessId1 })
+        .update({ pr_number: 7, pr_status: 'merged' });
+
+      await app.service('sessions').get(sessId1, params({ id: userId1 }));
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(getPRStatus).not.toHaveBeenCalled();
     });
   });
 

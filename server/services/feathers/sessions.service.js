@@ -185,28 +185,6 @@ export class SessionsService extends KnexService {
 
   async diff(data, params) {
     const session = params.resolvedSession;
-    // Refresh PR status in the background (skip if already merged)
-    if (session?.pr_number && session.pr_status !== 'merged') {
-      this.app
-        .service('users')
-        .get(session.user_id, {})
-        .then((user) => {
-          const token = getEffectiveGithubToken(user);
-          if (!token) return;
-          return getPRStatus(token, session.repo_full_name, session.pr_number).then((pr_status) => {
-            if (pr_status !== session.pr_status) {
-              this.app
-                .service('sessions')
-                .patch(
-                  session.id,
-                  { pr_status },
-                  { provider: undefined, user: { id: session.user_id } }
-                );
-            }
-          });
-        })
-        .catch(() => {});
-    }
     if (!session?.worktree_path) return { diff: '' };
     const cwd = resolveDataDirRelativePath(session.worktree_path);
     try {
@@ -630,11 +608,35 @@ export const sessionsHooks = {
   },
   after: {
     find: [addHasWebserver],
-    get: [addHasWebserver],
+    get: [refreshPrStatusAfterGet, addHasWebserver],
     create: [persistSystemPrompt, createFirstMessage, addHasWebserver],
     patch: [syncSessionSettingsAfterPatch, addHasWebserver],
   },
 };
+
+function refreshPrStatusInBackground(app, session) {
+  if (!session?.pr_number || session.pr_status === 'merged') return;
+  app
+    .service('users')
+    .get(session.user_id, {})
+    .then((user) => {
+      const token = getEffectiveGithubToken(user);
+      if (!token) return;
+      return getPRStatus(token, session.repo_full_name, session.pr_number).then((pr_status) => {
+        if (pr_status !== session.pr_status) {
+          app
+            .service('sessions')
+            .patch(session.id, { pr_status }, { provider: undefined, user: { id: session.user_id } });
+        }
+      });
+    })
+    .catch(() => {});
+}
+
+async function refreshPrStatusAfterGet(context) {
+  refreshPrStatusInBackground(context.app, context.result);
+  return context;
+}
 
 async function persistSystemPrompt(context) {
   const session = context.result;
