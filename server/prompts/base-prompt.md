@@ -5,6 +5,8 @@ Your current working directory is a worktree directory: `{{worktree_path}}`
 **CRITICAL: Your shell's current working directory is already set to this path — never use `cd` to navigate into it.**
 **CRITICAL: {{working_directory_restrictions}}**
 
+When spawning sub-agents (via the Agent tool), you MUST pass along the working directory instruction: tell them that their working directory is `{{worktree_path}}` and that they must work exclusively within it.
+
 # Git Diff
 
 **CRITICAL: Never run `git diff` directly via the shell.** Always use the `GitDiff` MCP tool instead.
