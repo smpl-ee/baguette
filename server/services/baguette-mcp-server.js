@@ -121,7 +121,7 @@ export function buildBaguetteMcpServer(session, app) {
         if (!session.auto_push) {
           return ok({
             message:
-              'Auto-push is disabled. Changes have been committed locally. The user can push manually or enable auto-push using the controls at the bottom of the chat.',
+              'Auto-push is disabled. Changes have been committed locally. The user can push manually or enable auto-push using the controls at the bottom of the chat. You should still call ReadSessionInfo and UpdateSession to ensure the session label and description are up to date.',
           });
         }
         let result;
@@ -146,6 +146,38 @@ export function buildBaguetteMcpServer(session, app) {
       ),
 
       // ── PR info ────────────────────────────────────────────────────────────
+
+      tool(
+        'ReadSessionInfo',
+        'Get the current session label (title) and description.',
+        {},
+        async () => {
+          const session = await getSession();
+          return ok({
+            label: session?.label ?? null,
+            description: session?.pr_description ?? null,
+          });
+        }
+      ),
+
+      tool(
+        'UpdateSession',
+        'Update the session label (title) and/or description. Use this to keep the session info in sync with the work being done.',
+        {
+          label: z.string().optional().describe('Session label / title'),
+          description: z.string().optional().describe('Session description (markdown)'),
+        },
+        async ({ label, description }) => {
+          const patch = {};
+          if (label !== undefined) patch.label = label;
+          if (description !== undefined) patch.pr_description = description;
+          if (Object.keys(patch).length === 0) {
+            return ok({ message: 'No changes provided.' });
+          }
+          await patchSession(patch);
+          return ok({ message: 'Session info updated.' });
+        }
+      ),
 
       tool('PrRead', 'Get the current PR info: URL, number, and branch.', {}, async () => {
         const result = {

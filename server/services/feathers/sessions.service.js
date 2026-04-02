@@ -391,6 +391,7 @@ async function prepareSessionEnvironment(context) {
       pr_number: pr.number,
       pr_url: pr.html_url,
       pr_status: 'open',
+      pr_description: pr.body ?? null,
       base_branch: pr.base.ref,
       created_branch: pr.head.ref,
       remote_branch: pr.head.ref,
@@ -442,6 +443,7 @@ async function prepareSessionEnvironment(context) {
         pr_number: openPr.number,
         pr_status: openPr.draft ? 'draft' : 'open',
         label: openPr.title,
+        pr_description: openPr.body ?? null,
       });
     } else {
       context.data.base_branch = defaultForDiff;

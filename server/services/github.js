@@ -300,6 +300,7 @@ export async function getOpenPR(token, repoFullName, branch) {
     number: pr.number,
     html_url: pr.html_url,
     title: pr.title,
+    body: pr.body ?? null,
     base_ref: pr.base.ref,
     draft: Boolean(pr.draft),
   };
