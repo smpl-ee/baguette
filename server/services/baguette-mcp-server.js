@@ -72,21 +72,30 @@ function annotateWithLineNumbers(diffText) {
   return out.join('\n');
 }
 
-export function buildBaguetteMcpServer(sessionId, userId, sessionRow, app) {
+export function buildBaguetteMcpServer(session, app) {
   const db = app.get('db');
 
+  const getSession = async () => {
+    const row = await db('sessions').where({ id: session.id }).first();
+    if (row) {
+      session = row;
+      return row;
+    }
+    return session;
+  };
+
   const getToken = async () => {
-    const user = await app.service('users').get(userId, {});
+    const user = await app.service('users').get(session.user_id, {});
     return getEffectiveGithubToken(user);
   };
 
-  const getSession = () => db('sessions').where({ id: sessionId }).first();
+  const patchSession = async (data) => {
+    const updated = await app.service('sessions').patch(session.id, data);
+    session = { ...session, ...updated };
+  };
 
-  const patchSession = (data) =>
-    app.service('sessions').patch(sessionId, data, { provider: undefined, user: { id: userId } });
-
-  const absoluteWorktreePath = resolveDataDirRelativePath(sessionRow.worktree_path) || '';
-  const { base_branch: baseBranch } = sessionRow;
+  const absoluteWorktreePath = resolveDataDirRelativePath(session.worktree_path) || '';
+  const { base_branch: baseBranch } = session;
 
   return createSdkMcpServer({
     name: 'baguette',
@@ -98,7 +107,6 @@ export function buildBaguetteMcpServer(sessionId, userId, sessionRow, app) {
         'Pull latest changes from the remote branch into the current worktree.',
         {},
         async () => {
-          const session = await getSession();
           if (!session?.remote_branch) return ok({ message: 'No remote branch to pull.' });
           const result = await gitPull(
             absoluteWorktreePath,
@@ -110,7 +118,6 @@ export function buildBaguetteMcpServer(sessionId, userId, sessionRow, app) {
       ),
 
       tool('GitPush', 'Push the current branch to origin and set upstream.', {}, async () => {
-        const session = await getSession();
         if (!session.auto_push) {
           return ok({
             message:
@@ -141,7 +148,6 @@ export function buildBaguetteMcpServer(sessionId, userId, sessionRow, app) {
       // ── PR info ────────────────────────────────────────────────────────────
 
       tool('PrRead', 'Get the current PR info: URL, number, and branch.', {}, async () => {
-        const session = await getSession();
         const result = {
           pr_url: session?.pr_url ?? null,
           pr_number: session?.pr_number ?? null,
@@ -162,7 +168,6 @@ export function buildBaguetteMcpServer(sessionId, userId, sessionRow, app) {
           description: z.string().optional().describe('PR body / description (markdown)'),
         },
         async ({ title, description = '' }) => {
-          const session = await getSession();
           // Always persist label and description to session regardless of auto_push
           await patchSession({ label: title, pr_description: description });
           if (!session.auto_push) {
@@ -198,16 +203,15 @@ export function buildBaguetteMcpServer(sessionId, userId, sessionRow, app) {
             }
           }
           // Re-read session since we may have patched it above
-          const freshSession = await getSession();
           const pr = await upsertPR(await getToken(), {
-            repoFullName: freshSession.repo_full_name,
-            prNumber: freshSession.pr_number,
+            repoFullName: session.repo_full_name,
+            prNumber: session.pr_number,
             title,
             body: description,
             head,
-            baseBranch: freshSession.base_branch,
+            baseBranch: session.base_branch,
           });
-          if (!freshSession.pr_number) {
+          if (!session.pr_number) {
             await patchSession({
               pr_url: pr.url,
               pr_number: pr.number,
@@ -407,7 +411,7 @@ export function buildBaguetteMcpServer(sessionId, userId, sessionRow, app) {
         async () => {
           let cfg;
           try {
-            cfg = await loadBaguetteConfig(sessionRow.worktree_path);
+            cfg = await loadBaguetteConfig(session.worktree_path);
             if (cfg?.error) throw new Error(cfg.error);
           } catch (err) {
             return fail(err.message);
@@ -441,7 +445,7 @@ export function buildBaguetteMcpServer(sessionId, userId, sessionRow, app) {
         async ({ label, args = [] }) => {
           let commands;
           try {
-            const cfg = await loadBaguetteConfig(sessionRow.worktree_path);
+            const cfg = await loadBaguetteConfig(session.worktree_path);
             if (cfg?.error) throw new Error(cfg.error);
             commands = cfg ? getAvailableCommands(cfg) : null;
           } catch (err) {
@@ -464,7 +468,7 @@ export function buildBaguetteMcpServer(sessionId, userId, sessionRow, app) {
               .service('tasks')
               .create(
                 {
-                  session_id: sessionId,
+                  session_id: session.id,
                   command: combined,
                   label,
                   onLog: (id, stream, data) => {
@@ -480,7 +484,7 @@ export function buildBaguetteMcpServer(sessionId, userId, sessionRow, app) {
                       })
                     ),
                 },
-                { user: { id: userId } }
+                { user: { id: session.user_id } }
               )
               .catch((err) => resolve(fail(err.message)));
           });
@@ -514,7 +518,7 @@ export function buildBaguetteMcpServer(sessionId, userId, sessionRow, app) {
               base_branch: repo.default_branch,
               initial_prompt: prompt,
             },
-            { provider: undefined, user: { id: userId } }
+            { provider: undefined, user: { id: session.user_id } }
           );
           const sessionPath = `/sessions/${newSession.id}`;
           return ok({

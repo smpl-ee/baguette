@@ -2,6 +2,7 @@ import { KnexService } from '@feathersjs/knex';
 import { NotAuthenticated } from '@feathersjs/errors';
 import { requireUser, encryptFields, decryptFields } from './hooks.js';
 import { SYSTEM_ALLOWED_COMMANDS } from '../../services/agent-settings.js';
+import { DEFAULT_PAGINATE } from '../../config.js';
 
 /**
  * Users service (table: users). Admin-only. Supports listing, getting,
@@ -98,7 +99,7 @@ export function registerUsersService(app, path = 'users') {
     Model: app.get('db'),
     name: 'users',
     id: 'id',
-    paginate: app.get('paginate') || { default: 20, max: 100 },
+    paginate: DEFAULT_PAGINATE,
   };
   app.use(path, new UsersService(options), {
     methods: ['find', 'get', 'create', 'patch', 'remove', 'approve', 'reject'],

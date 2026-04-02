@@ -75,7 +75,6 @@ const usersServiceGet = vi.fn().mockResolvedValue({ id: 1, github_token: 'test-t
 function makeApp(db) {
   const app = feathers();
   app.set('db', db);
-  app.set('paginate', { default: 20, max: 100 });
   app.use('tasks', { deleteSessionTasks }, { methods: ['deleteSessionTasks'] });
   app.use(
     'claude-agent',

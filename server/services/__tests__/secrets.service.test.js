@@ -16,7 +16,6 @@ const unauthParams = { provider: 'rest' };
 function makeApp(dbRef) {
   const app = feathers();
   app.set('db', dbRef);
-  app.set('paginate', { default: 20, max: 100 });
   registerSecretsService(app);
   return app;
 }

@@ -65,7 +65,6 @@ function linkAliceToRepo(repoId) {
 function makeApp(dbRef) {
   const app = feathers();
   app.set('db', dbRef);
-  app.set('paginate', { default: 20, max: 100 });
   app.use('sessions', { removeByRepoId }, { methods: ['removeByRepoId'] });
   registerReposService(app);
   return app;

@@ -174,9 +174,7 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
     <form onSubmit={handleStart} className="space-y-4">
       <div className="space-y-2">
         <div>
-          <label className="mb-1 block text-sm font-medium text-zinc-300">
-            Base branch
-          </label>
+          <label className="mb-1 block text-sm font-medium text-zinc-300">Base branch</label>
           <div className="flex min-w-0 items-center gap-2">
             <div className="min-w-0 flex-1">
               <SearchableSelect
@@ -256,39 +254,6 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
 
         {showMore && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mt-3">
-            <div className="sm:col-span-2">
-              <label className="flex cursor-pointer items-start gap-2 rounded-md border border-zinc-700/80 bg-zinc-800/40 px-3 py-2.5">
-                <input
-                  type="checkbox"
-                  checked={createNewBranch}
-                  onChange={(e) => setCreateNewBranch(e.target.checked)}
-                  className="mt-0.5 rounded border-zinc-600 text-amber-500 focus:ring-amber-500/50"
-                />
-                <span className="text-sm text-zinc-300">
-                  <span className="font-medium text-zinc-200">Create a new branch for this task</span>
-                  <span className="mt-0.5 block text-xs font-normal text-zinc-500">
-                    Uncheck to continue directly on the selected branch without creating a new one.
-                  </span>
-                </span>
-              </label>
-            </div>
-            <div className="sm:col-span-2">
-              <label className="flex cursor-pointer items-start gap-2 rounded-md border border-zinc-700/80 bg-zinc-800/40 px-3 py-2.5">
-                <input
-                  type="checkbox"
-                  checked={autoPush}
-                  onChange={(e) => setAutoPush(e.target.checked)}
-                  className="mt-0.5 rounded border-zinc-600 text-amber-500 focus:ring-amber-500/50"
-                />
-                <span className="text-sm text-zinc-300">
-                  <span className="font-medium text-zinc-200">Automatically commit and push after each turn</span>
-                  <span className="mt-0.5 block text-xs font-normal text-zinc-500">
-                    At the end of each turn, the agent will commit any changes and push to the remote
-                    branch. Disable to commit and push manually via the chat interface.
-                  </span>
-                </span>
-              </label>
-            </div>
             <div>
               <label className="block text-sm font-medium text-zinc-300 mb-1">Model</label>
               <select
@@ -304,7 +269,9 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-1">Permission Mode</label>
+              <label className="block text-sm font-medium text-zinc-300 mb-1">
+                Permission Mode
+              </label>
               <select
                 value={permissionMode}
                 onChange={(e) => setPermissionMode(e.target.value)}
@@ -353,22 +320,63 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
         )}
       </div>
 
-      <div className="flex items-center gap-3">
-        <button
-          type="submit"
-          disabled={!canSubmit}
-          className="bg-amber-500 hover:bg-amber-400 disabled:bg-zinc-700 disabled:text-zinc-500 text-zinc-950 px-5 py-2.5 rounded-md text-sm font-medium transition-colors"
-        >
-          {loading ? 'Creating...' : 'Start'}
-        </button>
-        <button
-          type="button"
-          onClick={handlePlan}
-          disabled={!canSubmit}
-          className="bg-zinc-800 hover:bg-zinc-700 disabled:bg-zinc-800 disabled:text-zinc-600 text-zinc-300 hover:text-white px-5 py-2.5 rounded-md text-sm font-medium transition-colors border border-zinc-700 disabled:border-zinc-700"
-        >
-          Plan
-        </button>
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-3">
+          <button
+            type="submit"
+            disabled={!canSubmit}
+            className="bg-amber-500 hover:bg-amber-400 disabled:bg-zinc-700 disabled:text-zinc-500 text-zinc-950 px-5 py-2.5 rounded-md text-sm font-medium transition-colors"
+          >
+            {loading ? 'Creating...' : 'Start'}
+          </button>
+          <button
+            type="button"
+            onClick={handlePlan}
+            disabled={!canSubmit}
+            className="bg-zinc-800 hover:bg-zinc-700 disabled:bg-zinc-800 disabled:text-zinc-600 text-zinc-300 hover:text-white px-5 py-2.5 rounded-md text-sm font-medium transition-colors border border-zinc-700 disabled:border-zinc-700"
+          >
+            Plan
+          </button>
+          <div className="hidden sm:block h-4 w-px bg-zinc-700" />
+          <div className="flex items-center gap-4">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={createNewBranch}
+              onClick={() => setCreateNewBranch((v) => !v)}
+              className="flex items-center gap-2 group"
+            >
+              <span
+                className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors focus:outline-none ${createNewBranch ? 'bg-amber-500' : 'bg-zinc-600'}`}
+              >
+                <span
+                  className={`inline-block h-3 w-3 rounded-full bg-white shadow transition-transform ${createNewBranch ? 'translate-x-3.5' : 'translate-x-0.5'}`}
+                />
+              </span>
+              <span className="text-xs text-zinc-400 group-hover:text-zinc-200 transition-colors">
+                New branch
+              </span>
+            </button>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={autoPush}
+              onClick={() => setAutoPush((v) => !v)}
+              className="flex items-center gap-2 group"
+            >
+              <span
+                className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors focus:outline-none ${autoPush ? 'bg-amber-500' : 'bg-zinc-600'}`}
+              >
+                <span
+                  className={`inline-block h-3 w-3 rounded-full bg-white shadow transition-transform ${autoPush ? 'translate-x-3.5' : 'translate-x-0.5'}`}
+                />
+              </span>
+              <span className="text-xs text-zinc-400 group-hover:text-zinc-200 transition-colors">
+                Auto-push
+              </span>
+            </button>
+          </div>
+        </div>
       </div>
     </form>
   );

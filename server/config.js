@@ -89,3 +89,7 @@ function getDataDir() {
   logger.info({ path: resolved }, 'Using data directory');
   return resolved;
 }
+
+
+export const DEFAULT_PAGINATE = { default: 20, max: 100 };
+export const MESSAGES_PAGINATE = { default: 100, max: 200 };

@@ -15,8 +15,6 @@ import { registerPluginsService } from './plugins.service.js';
  * Call after app.configure(rest()) and before app.setup(server).
  */
 export function registerFeathersServices(app) {
-  app.set('paginate', { default: 20, max: 100 });
-
   registerMessagesService(app);
   registerSessionsService(app);
   registerClaudeAgentService(app);

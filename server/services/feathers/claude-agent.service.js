@@ -3,7 +3,6 @@ import crypto from 'crypto';
 import logger from '../../logger.js';
 import { remoteHasNewCommits } from '../github.js';
 import {
-  getAgentModelFromUser,
   getEffectiveGithubToken,
   getAllowedCommandsFromUser,
 } from '../agent-settings.js';
@@ -26,17 +25,57 @@ function commandsToAllowedTools(commands) {
   return commands.map((cmd) => `Bash(${cmd}*)`);
 }
 
-async function buildQueryOptions(
+async function baseBuildQueryOptions(app, sessionRow, systemPrompt) {
+  const claudeEnv = await app.service('sessions').getClaudeEnv(sessionRow.id);
+  const mcpServer = buildBaguetteMcpServer(sessionRow, app);
+
+  const cwd =
+    resolveDataDirRelativePath(sessionRow.worktree_path) ||
+    sessionRow.absolute_worktree_path ||
+    '';
+
+  return {
+    cwd,
+    env: claudeEnv,
+    resume: sessionRow.claude_session_id,
+    model: sessionRow.model,
+    tools: { type: 'preset', preset: 'claude_code' },
+    settingSources: ['project'],
+    mcpServers: { baguette: mcpServer },
+    systemPrompt: {
+      type: 'preset',
+      preset: 'claude_code',
+      append: systemPrompt
+    },
+  };
+}
+
+async function buildBuilderQueryOptions(
+  app,
   sessionRow,
-  { canUseTool, env, model, abortController, allowedTools, mcpServer, pluginRows }
+  { canUseTool, abortController, allowedTools }
 ) {
-  const absoluteWorktreePath = resolveDataDirRelativePath(sessionRow.worktree_path) || '';
+  // Resolve installed plugins selected for this session
+  let pluginRows = [];
+  if (sessionRow.plugins) {
+    try {
+      const pluginIds = JSON.parse(sessionRow.plugins);
+      if (Array.isArray(pluginIds) && pluginIds.length > 0) {
+        pluginRows = await app.get('db')('plugins').whereIn('id', pluginIds);
+      }
+    } catch {
+      // malformed plugins JSON — ignore
+    }
+  }
+
   const pluginConfigs = (pluginRows || []).map((p) => ({
     type: 'local',
     path: resolveDataDirRelativePath(p.local_path),
   }));
+  const systemPrompt = await buildSystemPromptAppend(sessionRow);
+  const baseOptions = await baseBuildQueryOptions(app, sessionRow, systemPrompt);
   return {
-    cwd: absoluteWorktreePath,
+    ...baseOptions,
     // For bypassPermissions, use acceptEdits as the SDK-level mode — full bypass is handled
     // in canUseTool which auto-approves all tool calls when permissionMode is bypassPermissions.
     permissionMode: sessionRow.plan_mode
@@ -44,45 +83,25 @@ async function buildQueryOptions(
       : sessionRow.permission_mode === 'bypassPermissions'
         ? 'acceptEdits'
         : sessionRow.permission_mode,
-    resume: sessionRow.claude_session_id,
     canUseTool,
-    env,
-    model: model || undefined,
-    systemPrompt: {
-      type: 'preset',
-      preset: 'claude_code',
-      append: await buildSystemPromptAppend(sessionRow),
-    },
-    tools: { type: 'preset', preset: 'claude_code' },
-    settingSources: ['project'],
     abortController,
-    mcpServers: { baguette: mcpServer },
     ...(allowedTools?.length ? { allowedTools } : {}),
     ...(pluginConfigs.length ? { plugins: pluginConfigs } : {}),
   };
 }
 
 async function buildReviewerQueryOptions(
+  app,
   sessionRow,
-  { canUseTool, env, model, abortController, mcpServer }
+  { canUseTool, abortController }
 ) {
-  const absoluteWorktreePath = resolveDataDirRelativePath(sessionRow.worktree_path) || '';
+  const systemPrompt = await buildReviewerSystemPromptAppend(sessionRow);
+  const baseOptions = await baseBuildQueryOptions(app, sessionRow, systemPrompt);
   return {
-    cwd: absoluteWorktreePath,
+    ...baseOptions,
     permissionMode: 'default',
-    resume: sessionRow.claude_session_id,
     canUseTool,
-    env,
-    model: model || undefined,
-    systemPrompt: {
-      type: 'preset',
-      preset: 'claude_code',
-      append: await buildReviewerSystemPromptAppend(sessionRow),
-    },
-    tools: { type: 'preset', preset: 'claude_code' },
-    settingSources: ['project'],
     abortController,
-    mcpServers: { baguette: mcpServer },
   };
 }
 
@@ -114,13 +133,12 @@ export class ClaudeAgentService {
       return;
     }
 
-    const db = this.app.get('db');
-    const session = await db('sessions').where({ id: sessionId }).first();
+    const session = await this.app.service('sessions').get(sessionId);
     if (!session || session.archived_at) return;
 
     let agentSession;
     if (session.claude_session_id) {
-      agentSession = await this.ensureActiveSession(sessionId);
+      agentSession = await this.ensureActiveSession(session);
     } else {
       agentSession = await this.createAgentSession(session);
     }
@@ -133,21 +151,19 @@ export class ClaudeAgentService {
   }
 
   async createAgentSession(session) {
-    const db = this.app.get('db');
-    const { id: sessionId, user_id: userId } = session;
-
-    const sessionRow = await db('sessions').where({ id: sessionId }).first();
-    const sessionUser = await this.app.service('users').get(userId, {});
-    const sessionState = await this._startAgentLoop({ sessionId, sessionRow, user: sessionUser });
+    const sessionState = await this._startAgentLoop(session)
 
     await this.app
       .service('sessions')
-      .patch(sessionId, { status: 'running' }, { user: { id: userId } });
+      .patch(session.id, { status: 'running' });
     return sessionState;
   }
 
-  getActiveSession(sessionId) {
-    return this._activeSessions.get(sessionId);
+  /** @param {number | { id: number }} sessionOrId */
+  getActiveSession(sessionOrId) {
+    const id =
+      typeof sessionOrId === 'object' && sessionOrId !== null ? sessionOrId.id : sessionOrId;
+    return this._activeSessions.get(id);
   }
 
   /**
@@ -220,7 +236,7 @@ export class ClaudeAgentService {
    * canUseTool for reviewer sessions: auto-allows read tools and reviewer MCP tools,
    * proxies AskUserQuestion through the standard approval flow, denies everything else silently.
    */
-  createReviewerCanUseTool(sessionId, userId, permissionRequests) {
+  createReviewerCanUseTool(sessionId, userId, permissionRequests, sessionSettings) {
     const ALLOWED_TOOLS = new Set([
       'Read',
       'Glob',
@@ -242,7 +258,12 @@ export class ClaudeAgentService {
       'mcp__baguette__ShowDiff',
     ]);
     // Reuse the full approval flow for AskUserQuestion so the user sees the question in the UI
-    const askUserQuestionHandler = this.createCanUseTool(sessionId, userId, permissionRequests);
+    const askUserQuestionHandler = this.createCanUseTool(
+      sessionId,
+      userId,
+      permissionRequests,
+      sessionSettings
+    );
 
     return async (toolName, input, ctx) => {
       if (toolName === 'AskUserQuestion' || toolName === 'ExitPlanMode') {
@@ -267,7 +288,10 @@ export class ClaudeAgentService {
       }
 
       // Auto-approve everything in bypass mode, except ExitPlanMode which must always be reviewed
-      if (sessionSettings.permissionMode === 'bypassPermissions' && toolName !== 'ExitPlanMode') {
+      if (
+        sessionSettings?.permissionMode === 'bypassPermissions' &&
+        toolName !== 'ExitPlanMode'
+      ) {
         return { behavior: 'allow', updatedInput: input };
       }
 
@@ -342,8 +366,10 @@ export class ClaudeAgentService {
    * channel, query instance, session state, and kicks off the
    * message-processing loop.
    */
-  async _startAgentLoop({ sessionId, sessionRow, user, stateOverrides = {} }) {
-    const model = sessionRow.model || getAgentModelFromUser(user);
+  async _startAgentLoop(sessionRow) {
+    const user = await this.app.service('users').get(sessionRow.user_id, {});
+    const sessionId = sessionRow.id;
+    
     const channel = createMessageChannel();
     const permissionRequests = new Map();
     const abortController = new AbortController();
@@ -353,42 +379,29 @@ export class ClaudeAgentService {
       permissionMode: sessionRow.plan_mode ? 'plan' : sessionRow.permission_mode,
     };
     const canUseTool = isReviewer
-      ? this.createReviewerCanUseTool(sessionId, sessionRow.user_id, permissionRequests)
-      : this.createCanUseTool(sessionId, sessionRow.user_id, permissionRequests, sessionSettings);
+      ? this.createReviewerCanUseTool(
+          sessionId,
+          sessionRow.user_id,
+          permissionRequests,
+          sessionSettings
+        )
+      : this.createCanUseTool(
+          sessionId,
+          sessionRow.user_id,
+          permissionRequests,
+          sessionSettings
+        );
     const allowedTools = isReviewer ? [] : commandsToAllowedTools(getAllowedCommandsFromUser(user));
 
-    const claudeEnv = await this.app.service('sessions').getClaudeEnv(sessionId);
-    const mcpServer = buildBaguetteMcpServer(sessionId, sessionRow.user_id, sessionRow, this.app);
-
-    // Resolve installed plugins selected for this session
-    let pluginRows = [];
-    if (!isReviewer && sessionRow.plugins) {
-      try {
-        const pluginIds = JSON.parse(sessionRow.plugins);
-        if (Array.isArray(pluginIds) && pluginIds.length > 0) {
-          pluginRows = await this.app.get('db')('plugins').whereIn('id', pluginIds);
-        }
-      } catch {
-        // malformed plugins JSON — ignore
-      }
-    }
-
     const queryOptions = isReviewer
-      ? await buildReviewerQueryOptions(sessionRow, {
+      ? await buildReviewerQueryOptions(this.app, sessionRow, {
           canUseTool,
-          env: claudeEnv,
-          model,
           abortController,
-          mcpServer,
         })
-      : await buildQueryOptions(sessionRow, {
+      : await buildBuilderQueryOptions(this.app, sessionRow, {
           canUseTool,
-          env: claudeEnv,
-          model,
           abortController,
           allowedTools,
-          mcpServer,
-          pluginRows,
         });
 
     const queryInstance = query({ prompt: channel, options: queryOptions });
@@ -408,10 +421,13 @@ export class ClaudeAgentService {
       permissionRequests,
       abortController,
       sessionSettings,
-      ...stateOverrides,
     };
 
-    this._activeSessions.set(sessionId, sessionState);
+    if (sessionRow.claude_session_id) {
+      sessionState.claudeSessionId = sessionRow.claude_session_id;
+    }
+    
+    this._activeSessions.set(sessionRow.id, sessionState);
 
     this.processMessages(sessionState).catch((err) => {
       logger.error({ sessionId }, err.message);
@@ -420,32 +436,29 @@ export class ClaudeAgentService {
     return sessionState;
   }
 
-  async resumeSession(sessionId) {
-    const db = this.app.get('db');
-    const sessionRow = await db('sessions').where({ id: sessionId }).first();
-    if (!sessionRow) throw new Error('Session not found');
-    if (!sessionRow.claude_session_id) throw new Error('No Claude session to resume');
+  async resumeSession(session) {
+    if (!session.claude_session_id) throw new Error('No Claude session to resume');
 
-    const user = await this.app.service('users').get(sessionRow.user_id, {});
+    const sessionState = await this._startAgentLoop(session)
 
-    const sessionState = await this._startAgentLoop({
-      sessionId,
-      sessionRow,
-      user,
-      stateOverrides: { claudeSessionId: sessionRow.claude_session_id },
-    });
-
-    logger.info({ sessionId, claudeSessionId: sessionRow.claude_session_id }, 'Resumed session');
+    logger.info({ sessionId: session.id, claudeSessionId: session.claude_session_id }, 'Resumed session');
 
     return sessionState;
   }
 
-  async ensureActiveSession(sessionId) {
+  async ensureActiveSession(sessionOrId) {
+    const sessionRow =
+      typeof sessionOrId === 'object' && sessionOrId !== null
+        ? sessionOrId
+        : await this.app.get('db')('sessions').where({ id: sessionOrId }).first();
+    if (!sessionRow) return null;
+
+    const sessionId = sessionRow.id;
     const existing = this._activeSessions.get(sessionId);
     if (existing) return existing;
 
     if (!this._resumePromises.has(sessionId)) {
-      const promise = this.resumeSession(sessionId).finally(() => {
+      const promise = this.resumeSession(sessionRow).finally(() => {
         this._resumePromises.delete(sessionId);
       });
       this._resumePromises.set(sessionId, promise);

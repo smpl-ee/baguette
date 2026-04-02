@@ -12,17 +12,6 @@ export const SYSTEM_ALLOWED_COMMANDS = [
   'wc',
 ];
 
-const DEFAULT_MODEL = 'claude-sonnet-4-6';
-const DEFAULT_MODE = 'default';
-
-export function getAgentModelFromUser(user) {
-  return user?.model || DEFAULT_MODEL;
-}
-
-export function getDefaultPermissionModeFromUser(user) {
-  return user?.default_permission_mode || DEFAULT_MODE;
-}
-
 export function getAllowedCommandsFromUser(user) {
   let userCmds = [];
   if (user?.allowed_commands) {

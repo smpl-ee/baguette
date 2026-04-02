@@ -22,7 +22,7 @@ import {
 } from '../github.js';
 import logger from '../../logger.js';
 import { requireUser, scopeByUser } from './hooks.js';
-import { PUBLIC_HOST, DATA_DIR, resolveDataDirRelativePath } from '../../config.js';
+import { DEFAULT_PAGINATE, PUBLIC_HOST, DATA_DIR, resolveDataDirRelativePath } from '../../config.js';
 import path from 'path';
 import { buildTaskEnv, getClaudeEnvForSession } from '../session-env.js';
 import { getEffectiveGithubToken } from '../agent-settings.js';
@@ -556,7 +556,7 @@ export function registerSessionsService(app, path = 'sessions') {
     Model: app.get('db'),
     name: 'sessions',
     id: 'id',
-    paginate: app.get('paginate') || { default: 20, max: 100 },
+    paginate: DEFAULT_PAGINATE,
   };
   app.use(path, new SessionsService(options), {
     events: ['permission:request', 'permission:handled', 'app:error'],

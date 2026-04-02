@@ -28,7 +28,6 @@ vi.mock('../github.js', async (importOriginal) => {
 });
 
 vi.mock('../agent-settings.js', () => ({
-  getAgentModelFromUser: vi.fn(),
   getAllowedCommandsFromUser: vi.fn().mockReturnValue([]),
   getEffectiveGithubToken: vi.fn((user) => user?.access_token || null),
 }));
@@ -52,7 +51,6 @@ vi.mock('child_process', () => ({
 import path from 'path';
 import { createTestDb } from '../../test-utils/db.js';
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import { getAgentModelFromUser } from '../agent-settings.js';
 import { loadBaguetteConfig } from '../baguette-config.js';
 
 import { REPOS_DIR } from '../../config.js';
@@ -117,7 +115,13 @@ function makeMockApp(db) {
     },
     service: vi.fn((name) => {
       if (name === 'sessions')
-        return { patch: sessionPatch, remove: sessionRemove, emit: sessionEmit, getClaudeEnv };
+        return {
+          patch: sessionPatch,
+          remove: sessionRemove,
+          emit: sessionEmit,
+          getClaudeEnv,
+          get: async (id) => db('sessions').where({ id }).first(),
+        };
       if (name === 'messages') return { create: messageCreate, remove: genericRemove };
       if (name === 'tasks') return { create: createTask, deleteSessionTasks };
       if (name === 'users')
@@ -175,7 +179,6 @@ describe('ClaudeAgentService', (hooks) => {
     [BASE_SESSION_ID] = await db('sessions').insert(BASE_SESSION_DATA);
 
     // Default mocks
-    getAgentModelFromUser.mockReturnValue('claude-sonnet-4-5');
     loadBaguetteConfig.mockResolvedValue(null);
 
     // Use mockImplementation so each query() call gets a fresh iterable
@@ -204,11 +207,7 @@ describe('ClaudeAgentService', (hooks) => {
       );
 
       // Status patched to 'running'
-      expect(mockApp._sessionPatch).toHaveBeenCalledWith(
-        BASE_SESSION_ID,
-        { status: 'running' },
-        expect.anything()
-      );
+      expect(mockApp._sessionPatch).toHaveBeenCalledWith(BASE_SESSION_ID, { status: 'running' });
 
       // Session state returned
       expect(sessionState.sessionId).toBe(BASE_SESSION_ID);
@@ -336,13 +335,11 @@ describe('ClaudeAgentService', (hooks) => {
         { signal: abortController.signal }
       );
 
-      // Status should be patched to 'approval'
+      // Status should be patched to 'approval' (after initial 'running' from createAgentSession)
       await vi.waitFor(() => {
-        expect(mockApp._sessionPatch).toHaveBeenCalledWith(
-          BASE_SESSION_ID,
-          { status: 'approval' },
-          expect.anything()
-        );
+        expect(
+          mockApp._sessionPatch.mock.calls.some((c) => c[1]?.status === 'approval')
+        ).toBe(true);
       });
 
       // Permission event should have been emitted

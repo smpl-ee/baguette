@@ -1,13 +1,11 @@
 import { loadBaguetteConfig } from './baguette-config.js';
 import loadPrompt from '../prompts/loadPrompt.js';
-import { resolveDataDirRelativePath } from '../config.js';
 
 /**
  * Builds the full system prompt append string for a builder session.
  * Returns the rendered build-prompt.md template with all variables substituted.
  */
 export async function buildSystemPromptAppend(sessionRow) {
-  const absoluteWorktreePath = resolveDataDirRelativePath(sessionRow.worktree_path) || '';
   const hasBaguetteYaml = Boolean(await loadBaguetteConfig(sessionRow.worktree_path));
   const baguetteConfigNotice = hasBaguetteYaml
     ? ''
@@ -15,10 +13,10 @@ export async function buildSystemPromptAppend(sessionRow) {
 
   return loadPrompt('build-prompt', {
     base_branch: sessionRow.base_branch,
-    worktree_path: absoluteWorktreePath,
+    worktree_path: sessionRow.absolute_worktree_path,
     baguette_config_notice: baguetteConfigNotice,
     base_prompt: await loadPrompt('base-prompt', {
-      worktree_path: absoluteWorktreePath,
+      worktree_path: sessionRow.absolute_worktree_path,
       working_directory_restrictions:
         'Work exclusively within your current working directory. Do not read, edit, search files or run any shell command outside of it.',
     }),
@@ -30,13 +28,12 @@ export async function buildSystemPromptAppend(sessionRow) {
  * Returns the rendered reviewer-prompt.md template with all variables substituted.
  */
 export async function buildReviewerSystemPromptAppend(sessionRow) {
-  const absoluteWorktreePath = resolveDataDirRelativePath(sessionRow.worktree_path) || '';
   return loadPrompt('reviewer-prompt', {
-    worktree_path: absoluteWorktreePath,
+    worktree_path: sessionRow.absolute_worktree_path,
     pr_number: String(sessionRow.pr_number || ''),
     repo_full_name: sessionRow.repo_full_name || '',
     base_prompt: await loadPrompt('base-prompt', {
-      worktree_path: absoluteWorktreePath,
+      worktree_path: sessionRow.absolute_worktree_path,
       working_directory_restrictions:
         'Work exclusively within your current working directory. Do NOT modify, create, or delete any files.',
     }),

@@ -10,9 +10,13 @@ vi.mock('../baguette-config.js', () => ({
   getScriptCommand: vi.fn(),
 }));
 
-vi.mock('../../config.js', () => ({
-  resolveDataDirRelativePath: vi.fn((p) => p || ''),
-}));
+vi.mock('../../config.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    resolveDataDirRelativePath: vi.fn((p) => p || ''),
+  };
+});
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

@@ -68,6 +68,8 @@ import { buildBaguetteMcpServer } from '../baguette-mcp-server.js';
 
 const DEFAULT_SESSION = {
   id: 1,
+  user_id: 1,
+  repo_id: 7,
   pr_url: null,
   pr_number: null,
   remote_branch: null,
@@ -92,15 +94,28 @@ function makeTaskCreate({ exitCode = 0, stdout = '', stderr = '' } = {}) {
 }
 
 function makeApp(sessionData, { tasksCreate } = {}) {
-  const mockPatch = vi.fn().mockResolvedValue({});
+  let sessionSnapshot = {
+    ...DEFAULT_SESSION,
+    ...sessionData,
+    user_id: sessionData.user_id ?? DEFAULT_SESSION.user_id,
+  };
+  const mockPatch = vi.fn().mockImplementation(async (id, data) => {
+    sessionSnapshot = { ...sessionSnapshot, ...data, id };
+    return sessionSnapshot;
+  });
   const mockGetTaskEnv = vi.fn().mockResolvedValue({});
   const mockCreate = tasksCreate ?? vi.fn().mockResolvedValue({ id: 99 });
   const db = (table) => {
-    if (table === 'sessions') return { where: () => ({ first: async () => sessionData }) };
+    if (table === 'sessions')
+      return { where: () => ({ first: async () => ({ ...sessionSnapshot }) }) };
     if (table === 'users')
       return { where: () => ({ first: async () => ({ id: 1, github_token: 'tok' }) }) };
     if (table === 'repos')
-      return { where: () => ({ first: async () => ({ id: 1, default_branch: 'main' }) }) };
+      return {
+        where: () => ({
+          first: async () => ({ id: sessionSnapshot.repo_id ?? 7, default_branch: 'main' }),
+        }),
+      };
     return { where: () => ({ first: async () => null }) };
   };
   const app = {
@@ -116,7 +131,7 @@ function makeApp(sessionData, { tasksCreate } = {}) {
 function buildServer(sessionOverrides = {}, appOpts = {}) {
   const sessionRow = { ...DEFAULT_SESSION, ...sessionOverrides };
   const { app, mockPatch, mockGetTaskEnv, mockCreate } = makeApp(sessionRow, appOpts);
-  buildBaguetteMcpServer(1, 1, sessionRow, app);
+  buildBaguetteMcpServer(sessionRow, app);
   const tools = createSdkMcpServer.mock.calls[0][0].tools;
   return { tools, mockPatch, mockGetTaskEnv, mockCreate };
 }
@@ -217,11 +232,10 @@ describe('GitPush', () => {
     const result = parseResult(await callTool(tools, 'GitPush'));
     expect(result.ok).toBe(true);
     expect(result.branch).toBe('feature-branch');
-    expect(mockPatch).toHaveBeenCalledWith(
-      1,
-      { remote_branch: 'feature-branch', created_branch: 'feature-branch' },
-      expect.anything()
-    );
+    expect(mockPatch).toHaveBeenCalledWith(1, {
+      remote_branch: 'feature-branch',
+      created_branch: 'feature-branch',
+    });
   });
 
   it('skips push and returns ok message when auto_push is disabled', async () => {
@@ -250,20 +264,12 @@ describe('PrUpsert', () => {
       'ghtoken',
       expect.objectContaining({ head: 'feature-branch' })
     );
-    expect(mockPatch).toHaveBeenCalledWith(
-      1,
-      { label: 'My PR', pr_description: 'Details' },
-      expect.anything()
-    );
-    expect(mockPatch).toHaveBeenCalledWith(
-      1,
-      {
-        pr_url: 'https://github.com/owner/repo/pull/1',
-        pr_number: 1,
-        pr_status: 'open',
-      },
-      expect.anything()
-    );
+    expect(mockPatch).toHaveBeenCalledWith(1, { label: 'My PR', pr_description: 'Details' });
+    expect(mockPatch).toHaveBeenCalledWith(1, {
+      pr_url: 'https://github.com/owner/repo/pull/1',
+      pr_number: 1,
+      pr_status: 'open',
+    });
   });
 
   it('updates existing PR without HEAD lookup; patches label and description', async () => {
@@ -274,11 +280,10 @@ describe('PrUpsert', () => {
     );
     expect(result.ok).toBe(true);
     expect(execFile).not.toHaveBeenCalled();
-    expect(mockPatch).toHaveBeenCalledWith(
-      1,
-      { label: 'Updated', pr_description: 'Updated body' },
-      expect.anything()
-    );
+    expect(mockPatch).toHaveBeenCalledWith(1, {
+      label: 'Updated',
+      pr_description: 'Updated body',
+    });
   });
 
   it('fails and links session when an open PR already exists for HEAD', async () => {
@@ -299,21 +304,13 @@ describe('PrUpsert', () => {
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(/already exists/);
     expect(upsertPR).not.toHaveBeenCalled();
-    expect(mockPatch).toHaveBeenCalledWith(
-      1,
-      { label: 'New title', pr_description: 'Body' },
-      expect.anything()
-    );
-    expect(mockPatch).toHaveBeenCalledWith(
-      1,
-      {
-        pr_url: 'https://github.com/owner/repo/pull/7',
-        pr_number: 7,
-        pr_status: 'open',
-        label: 'Already open',
-      },
-      expect.anything()
-    );
+    expect(mockPatch).toHaveBeenCalledWith(1, { label: 'New title', pr_description: 'Body' });
+    expect(mockPatch).toHaveBeenCalledWith(1, {
+      pr_url: 'https://github.com/owner/repo/pull/7',
+      pr_number: 7,
+      pr_status: 'open',
+      label: 'Already open',
+    });
   });
 
   it('persists label and description but skips GitHub when auto_push is disabled', async () => {
@@ -323,11 +320,7 @@ describe('PrUpsert', () => {
     );
     expect(result.ok).toBe(true);
     expect(upsertPR).not.toHaveBeenCalled();
-    expect(mockPatch).toHaveBeenCalledWith(
-      1,
-      { label: 'My PR', pr_description: 'Details' },
-      expect.anything()
-    );
+    expect(mockPatch).toHaveBeenCalledWith(1, { label: 'My PR', pr_description: 'Details' });
     expect(mockPatch).toHaveBeenCalledTimes(1);
   });
 });
@@ -684,16 +677,15 @@ describe('PrWorkflowLogs', () => {
 
 describe('GitDiff', () => {
   it('calls git merge-base to compute base and returns annotated diff', async () => {
-    execFile
-      .mockImplementationOnce((_cmd, args, _opts, cb) => {
-        // merge-base call
-        if (args[0] === 'merge-base') cb(null, { stdout: 'abc123\n', stderr: '' });
-        else cb(null, { stdout: '', stderr: '' });
-      })
-      .mockImplementationOnce((_cmd, args, _opts, cb) => {
-        // diff call
+    execFile.mockImplementation((_cmd, args, _opts, cb) => {
+      if (args[0] === 'merge-base') {
+        cb(null, { stdout: 'abc123\n', stderr: '' });
+      } else if (args[0] === 'diff') {
         cb(null, { stdout: '@@ -1,3 +1,3 @@\n context\n+added line\n-removed\n', stderr: '' });
-      });
+      } else {
+        cb(null, { stdout: '', stderr: '' });
+      }
+    });
     const { tools } = buildServer();
     const result = parseResult(await callTool(tools, 'GitDiff', { args: [] }));
     expect(result.ok).toBe(true);
@@ -703,13 +695,11 @@ describe('GitDiff', () => {
   });
 
   it('skips annotation for --name-only flag', async () => {
-    execFile
-      .mockImplementationOnce((_cmd, args, _opts, cb) =>
-        cb(null, { stdout: 'abc123\n', stderr: '' })
-      )
-      .mockImplementationOnce((_cmd, _args, _opts, cb) =>
-        cb(null, { stdout: 'src/foo.js\nsrc/bar.js\n', stderr: '' })
-      );
+    execFile.mockImplementation((_cmd, args, _opts, cb) => {
+      if (args[0] === 'merge-base') cb(null, { stdout: 'abc1234\n', stderr: '' });
+      else if (args[0] === 'diff') cb(null, { stdout: 'src/foo.js\nsrc/bar.js\n', stderr: '' });
+      else cb(null, { stdout: '', stderr: '' });
+    });
     const { tools } = buildServer();
     const result = parseResult(await callTool(tools, 'GitDiff', { args: ['--name-only'] }));
     expect(result.diff).toBe('src/foo.js\nsrc/bar.js\n');

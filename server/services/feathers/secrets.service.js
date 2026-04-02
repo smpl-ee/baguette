@@ -1,5 +1,6 @@
 import { KnexService } from '@feathersjs/knex';
 import { requireUser } from './hooks.js';
+import { DEFAULT_PAGINATE } from '../../config.js';
 
 /**
  * Secrets service (table: secrets). Any authenticated user can list secrets;
@@ -52,7 +53,7 @@ export function registerSecretsService(app, path = 'secrets') {
     Model: app.get('db'),
     name: 'secrets',
     id: 'id',
-    paginate: app.get('paginate') || { default: 20, max: 100 },
+    paginate: DEFAULT_PAGINATE,
   };
   app.use(path, new SecretsService(options));
   app.service(path).hooks(secretsHooks);
