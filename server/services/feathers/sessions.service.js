@@ -288,6 +288,66 @@ export class SessionsService extends KnexService {
     return { ok: true };
   }
 
+  async restore(data, params) {
+    const session = params.resolvedSession;
+    if (!session.archived_at) {
+      throw new BadRequest('Can only restore archived sessions');
+    }
+
+    const db = this.app.get('db');
+
+    // Check if worktree still exists
+    const resolvedPath = session.worktree_path
+      ? resolveDataDirRelativePath(session.worktree_path)
+      : null;
+    const worktreeExists = resolvedPath
+      ? await fs.access(resolvedPath).then(() => true).catch(() => false)
+      : false;
+
+    const dbUpdate = { archived_at: null, status: 'stopped' };
+
+    if (!worktreeExists) {
+      const repo = session.repo_id ? await db('repos').where({ id: session.repo_id }).first() : null;
+      if (!repo) throw new BadRequest('Session has no associated repository');
+      const user = await this.app.service('users').get(session.user_id, {});
+      const token = getEffectiveGithubToken(user);
+      if (!token) throw new BadRequest('No GitHub token configured');
+
+      const branch = session.remote_branch || session.created_branch;
+      if (!branch) throw new BadRequest('Session has no branch to restore to');
+
+      const { worktreePath: absoluteWorktreePath } = await createWorktree(
+        repo,
+        branch,
+        session.short_id,
+        token,
+        { detach: false, baseBranch: session.base_branch }
+      );
+      dbUpdate.worktree_path = path.relative(DATA_DIR, absoluteWorktreePath);
+    }
+
+    await db('sessions').where({ id: session.id }).update(dbUpdate);
+
+    await this.app.service('messages').create(
+      {
+        session_id: session.id,
+        type: 'system',
+        subtype: 'status',
+        message_json: JSON.stringify({
+          type: 'system',
+          subtype: 'status',
+          status: worktreeExists ? 'Session restored' : 'Session restored — worktree recreated',
+        }),
+      },
+      { user: { id: session.user_id } }
+    );
+
+    const updated = await db('sessions').where({ id: session.id }).first();
+    this.emit('patched', updated);
+
+    return { ok: true };
+  }
+
   async onMessageCreated(message) {
     const sessionId = message.session_id;
     if (!sessionId) return;
@@ -578,6 +638,7 @@ export function registerSessionsService(app, path = 'sessions') {
       'showDiff',
       'merge',
       'push',
+      'restore',
     ],
   });
   app.service(path).hooks(sessionsHooks);
@@ -609,6 +670,7 @@ export const sessionsHooks = {
     showDiff: [resolveSessionFromData],
     merge: [resolveSessionFromData],
     push: [resolveSessionFromData],
+    restore: [resolveSessionFromData],
     resolvePermission: [requireUser],
   },
   after: {

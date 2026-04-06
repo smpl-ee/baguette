@@ -96,6 +96,7 @@ export default function ChatView({
   const [merging, setMerging] = useState(false);
   const [mergeError, setMergeError] = useState(null);
   const [pushing, setPushing] = useState(false);
+  const [restoring, setRestoring] = useState(false);
 
   const isRunning = session?.status === 'running';
   const isReviewerSession = session?.agent_type === 'reviewer';
@@ -134,6 +135,18 @@ export default function ChatView({
       }
     } finally {
       setPushing(false);
+    }
+  };
+
+  const handleRestore = async () => {
+    if (!session?.id || restoring) return;
+    setRestoring(true);
+    try {
+      await sessionsService.restore(session.id);
+    } catch (err) {
+      toastError('Failed to restore session', err);
+    } finally {
+      setRestoring(false);
     }
   };
 
@@ -316,6 +329,21 @@ export default function ChatView({
               >
                 Open
               </button>
+            </div>
+          )}
+          {session?.archived_at && (
+            <div className="flex gap-2 flex-wrap py-2">
+              <Tooltip content="Recreate the worktree on the same branch and resume this session.">
+                <button
+                  type="button"
+                  onClick={handleRestore}
+                  disabled={restoring}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 border border-zinc-700 rounded-lg text-xs text-zinc-300 transition-colors"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  {restoring ? 'Restoring…' : 'Restore'}
+                </button>
+              </Tooltip>
             </div>
           )}
           {!readonly && session?.status === 'completed' && session?.pr_status !== 'merged' && (commitsToPush > 0 || hasUncommitted) && (
