@@ -49,16 +49,16 @@ export default function ReviewerForm({ repoFullName, onSubmit, loading }) {
 
   const canSubmit = !loading && repoFullName && prNumber;
 
-  const handleStart = (e) => {
+  const handleStart = async (e) => {
     e.preventDefault();
     if (!canSubmit) return;
-    onSubmit({
+    const submitted = await onSubmit({
       repoFullName,
       prNumber: parseInt(prNumber, 10),
       model: model || undefined,
       extraInstructions: extraInstructions || undefined,
     });
-    persistentState.clear();
+    if (submitted) persistentState.clear();
   };
 
   return (

@@ -66,13 +66,16 @@ export async function requireUser(context) {
 }
 
 export async function scopeByUser(context) {
+  const userId = context.params.user?.id;
   if (context.method === 'create') {
-    context.data.user_id = context.params.user.id;
+    if (userId) context.data.user_id = userId;
     return context;
   }
 
+  if (!userId) return context;
+
   const query = context.service.createQuery(context.params);
-  context.params.knex = query.where('user_id', context.params.user.id);
+  context.params.knex = query.where('user_id', userId);
   return context;
 }
 

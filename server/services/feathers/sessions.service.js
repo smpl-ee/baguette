@@ -343,6 +343,9 @@ async function requireOwnSession(context) {
   const id = context.id;
   const userId = context.params.user?.id;
   if (id == null) return context; // multi-patch, skip
+  // Internal calls may patch without params.user (e.g. system status updates).
+  // `requireUser` already enforces auth for external providers.
+  if (!userId) return context;
   const session = await db('sessions').where({ id, user_id: userId }).first();
   if (!session) throw new NotFound('Session not found');
   // Clear params.knex: scopeByUser set it to a SELECT builder which gets consumed

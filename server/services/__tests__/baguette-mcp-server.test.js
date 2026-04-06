@@ -79,6 +79,7 @@ const DEFAULT_SESSION = {
   worktree_path: '/tmp/wt',
   auto_push: 1,
 };
+const INTERNAL_PATCH_PARAMS = { provider: undefined, user: { id: 1 } };
 
 /** Simulates a task that calls onLog/onExit callbacks asynchronously. */
 function makeTaskCreate({ exitCode = 0, stdout = '', stderr = '' } = {}) {
@@ -232,10 +233,14 @@ describe('GitPush', () => {
     const result = parseResult(await callTool(tools, 'GitPush'));
     expect(result.ok).toBe(true);
     expect(result.branch).toBe('feature-branch');
-    expect(mockPatch).toHaveBeenCalledWith(1, {
-      remote_branch: 'feature-branch',
-      created_branch: 'feature-branch',
-    });
+    expect(mockPatch).toHaveBeenCalledWith(
+      1,
+      {
+        remote_branch: 'feature-branch',
+        created_branch: 'feature-branch',
+      },
+      INTERNAL_PATCH_PARAMS
+    );
   });
 
   it('skips push and returns ok message when auto_push is disabled', async () => {
@@ -264,12 +269,20 @@ describe('PrUpsert', () => {
       'ghtoken',
       expect.objectContaining({ head: 'feature-branch' })
     );
-    expect(mockPatch).toHaveBeenCalledWith(1, { label: 'My PR', pr_description: 'Details' });
-    expect(mockPatch).toHaveBeenCalledWith(1, {
-      pr_url: 'https://github.com/owner/repo/pull/1',
-      pr_number: 1,
-      pr_status: 'open',
-    });
+    expect(mockPatch).toHaveBeenCalledWith(
+      1,
+      { label: 'My PR', pr_description: 'Details' },
+      INTERNAL_PATCH_PARAMS
+    );
+    expect(mockPatch).toHaveBeenCalledWith(
+      1,
+      {
+        pr_url: 'https://github.com/owner/repo/pull/1',
+        pr_number: 1,
+        pr_status: 'open',
+      },
+      INTERNAL_PATCH_PARAMS
+    );
   });
 
   it('updates existing PR without HEAD lookup; patches label and description', async () => {
@@ -280,10 +293,14 @@ describe('PrUpsert', () => {
     );
     expect(result.ok).toBe(true);
     expect(execFile).not.toHaveBeenCalled();
-    expect(mockPatch).toHaveBeenCalledWith(1, {
-      label: 'Updated',
-      pr_description: 'Updated body',
-    });
+    expect(mockPatch).toHaveBeenCalledWith(
+      1,
+      {
+        label: 'Updated',
+        pr_description: 'Updated body',
+      },
+      INTERNAL_PATCH_PARAMS
+    );
   });
 
   it('fails and links session when an open PR already exists for HEAD', async () => {
@@ -304,13 +321,21 @@ describe('PrUpsert', () => {
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(/already exists/);
     expect(upsertPR).not.toHaveBeenCalled();
-    expect(mockPatch).toHaveBeenCalledWith(1, { label: 'New title', pr_description: 'Body' });
-    expect(mockPatch).toHaveBeenCalledWith(1, {
-      pr_url: 'https://github.com/owner/repo/pull/7',
-      pr_number: 7,
-      pr_status: 'open',
-      label: 'Already open',
-    });
+    expect(mockPatch).toHaveBeenCalledWith(
+      1,
+      { label: 'New title', pr_description: 'Body' },
+      INTERNAL_PATCH_PARAMS
+    );
+    expect(mockPatch).toHaveBeenCalledWith(
+      1,
+      {
+        pr_url: 'https://github.com/owner/repo/pull/7',
+        pr_number: 7,
+        pr_status: 'open',
+        label: 'Already open',
+      },
+      INTERNAL_PATCH_PARAMS
+    );
   });
 
   it('persists label and description but skips GitHub when auto_push is disabled', async () => {
@@ -320,7 +345,11 @@ describe('PrUpsert', () => {
     );
     expect(result.ok).toBe(true);
     expect(upsertPR).not.toHaveBeenCalled();
-    expect(mockPatch).toHaveBeenCalledWith(1, { label: 'My PR', pr_description: 'Details' });
+    expect(mockPatch).toHaveBeenCalledWith(
+      1,
+      { label: 'My PR', pr_description: 'Details' },
+      INTERNAL_PATCH_PARAMS
+    );
     expect(mockPatch).toHaveBeenCalledTimes(1);
   });
 });

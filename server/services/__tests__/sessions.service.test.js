@@ -569,6 +569,13 @@ describe('Sessions service - find, get, create', (hooks) => {
         app.service('sessions').patch(sessId1, { status: 'completed' }, { provider: 'rest' })
       ).rejects.toThrow('Not authenticated');
     });
+
+    it('allows internal patch without user and avoids undefined user_id binding errors', async () => {
+      const updated = await app.service('sessions').patch(sessId1, { status: 'completed' }, {});
+
+      expect(updated.id).toBe(sessId1);
+      expect(updated.status).toBe('completed');
+    });
   });
 
   // ── create ─────────────────────────────────────────────────────────────────
@@ -668,6 +675,12 @@ describe('Sessions service - find, get, create', (hooks) => {
       await expect(
         app.service('sessions').create(sessionData(), { provider: 'rest' })
       ).rejects.toThrow('Not authenticated');
+    });
+
+    it('internal create without user no longer throws a TypeError from scopeByUser', async () => {
+      await expect(app.service('sessions').create(sessionData(), {})).rejects.not.toThrow(
+        /Cannot read properties of undefined \(reading 'id'\)/
+      );
     });
 
     it('create_new_branch=false uses the selected branch and links an open PR when present', async () => {

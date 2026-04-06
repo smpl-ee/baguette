@@ -90,7 +90,9 @@ export function buildBaguetteMcpServer(session, app) {
   };
 
   const patchSession = async (data) => {
-    const updated = await app.service('sessions').patch(session.id, data);
+    const updated = await app
+      .service('sessions')
+      .patch(session.id, data, { provider: undefined, user: { id: session.user_id } });
     session = { ...session, ...updated };
   };
 

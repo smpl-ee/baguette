@@ -102,10 +102,10 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
     setFileError(null);
   };
 
-  const handleStart = (e) => {
+  const handleStart = async (e) => {
     e.preventDefault();
     if (!canSubmit) return;
-    onSubmit({
+    const submitted = await onSubmit({
       repoFullName,
       branch,
       initialPrompt,
@@ -117,13 +117,13 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
       autoPush,
       plugins: selectedPlugins.length > 0 ? selectedPlugins : undefined,
     });
-    clearForm();
+    if (submitted) clearForm();
   };
 
-  const handlePlan = (e) => {
+  const handlePlan = async (e) => {
     e.preventDefault();
     if (!canSubmit) return;
-    onSubmit({
+    const submitted = await onSubmit({
       repoFullName,
       branch,
       initialPrompt,
@@ -135,14 +135,14 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
       autoPush,
       plugins: selectedPlugins.length > 0 ? selectedPlugins : undefined,
     });
-    clearForm();
+    if (submitted) clearForm();
   };
 
-  const handleKeyDown = (e) => {
+  const handleKeyDown = async (e) => {
     if (!isMobile() && e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       if (canSubmit) {
-        onSubmit({
+        const submitted = await onSubmit({
           repoFullName,
           branch,
           initialPrompt,
@@ -154,7 +154,7 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
           autoPush,
           plugins: selectedPlugins.length > 0 ? selectedPlugins : undefined,
         });
-        clearForm();
+        if (submitted) clearForm();
       }
     }
   };
@@ -320,6 +320,44 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
         )}
       </div>
 
+      <div className="flex items-center gap-4">
+        <button
+          type="button"
+          role="switch"
+          aria-checked={createNewBranch}
+          onClick={() => setCreateNewBranch((v) => !v)}
+          className="flex items-center gap-2 group"
+        >
+          <span
+            className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors focus:outline-none ${createNewBranch ? 'bg-amber-500' : 'bg-zinc-600'}`}
+          >
+            <span
+              className={`inline-block h-3 w-3 rounded-full bg-white shadow transition-transform ${createNewBranch ? 'translate-x-3.5' : 'translate-x-0.5'}`}
+            />
+          </span>
+          <span className="text-xs text-zinc-400 group-hover:text-zinc-200 transition-colors">
+            New branch
+          </span>
+        </button>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={autoPush}
+          onClick={() => setAutoPush((v) => !v)}
+          className="flex items-center gap-2 group"
+        >
+          <span
+            className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors focus:outline-none ${autoPush ? 'bg-amber-500' : 'bg-zinc-600'}`}
+          >
+            <span
+              className={`inline-block h-3 w-3 rounded-full bg-white shadow transition-transform ${autoPush ? 'translate-x-3.5' : 'translate-x-0.5'}`}
+            />
+          </span>
+          <span className="text-xs text-zinc-400 group-hover:text-zinc-200 transition-colors">
+            Auto-push
+          </span>
+        </button>
+      </div>
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-3">
           <button
@@ -337,45 +375,6 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
           >
             Plan
           </button>
-          <div className="hidden sm:block h-4 w-px bg-zinc-700" />
-          <div className="flex items-center gap-4">
-            <button
-              type="button"
-              role="switch"
-              aria-checked={createNewBranch}
-              onClick={() => setCreateNewBranch((v) => !v)}
-              className="flex items-center gap-2 group"
-            >
-              <span
-                className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors focus:outline-none ${createNewBranch ? 'bg-amber-500' : 'bg-zinc-600'}`}
-              >
-                <span
-                  className={`inline-block h-3 w-3 rounded-full bg-white shadow transition-transform ${createNewBranch ? 'translate-x-3.5' : 'translate-x-0.5'}`}
-                />
-              </span>
-              <span className="text-xs text-zinc-400 group-hover:text-zinc-200 transition-colors">
-                New branch
-              </span>
-            </button>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={autoPush}
-              onClick={() => setAutoPush((v) => !v)}
-              className="flex items-center gap-2 group"
-            >
-              <span
-                className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors focus:outline-none ${autoPush ? 'bg-amber-500' : 'bg-zinc-600'}`}
-              >
-                <span
-                  className={`inline-block h-3 w-3 rounded-full bg-white shadow transition-transform ${autoPush ? 'translate-x-3.5' : 'translate-x-0.5'}`}
-                />
-              </span>
-              <span className="text-xs text-zinc-400 group-hover:text-zinc-200 transition-colors">
-                Auto-push
-              </span>
-            </button>
-          </div>
         </div>
       </div>
     </form>

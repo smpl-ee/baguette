@@ -116,7 +116,6 @@ function UsageGraph({ repoFilter }) {
 export default function Dashboard() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState(null);
-  const [lastParams, setLastParams] = useState(null);
   const [formKey, setFormKey] = useState(0);
   const location = useLocation();
   const navigate = useNavigate();
@@ -163,10 +162,9 @@ export default function Dashboard() {
         params.initial_files = await Promise.all(files.map(fileToContentBlock));
       } catch (err) {
         setCreateError(err?.message ?? 'Failed to read attached files');
-        return;
+        return false;
       }
     }
-    setLastParams(params);
     setCreating(true);
     setCreateError(null);
     try {
@@ -176,8 +174,10 @@ export default function Dashboard() {
       if (initRepo || initPrompt) {
         navigate('/', { replace: true });
       }
+      return true;
     } catch (err) {
       setCreateError(err?.message ?? 'Failed to create session');
+      return false;
     } finally {
       setCreating(false);
     }
@@ -194,14 +194,15 @@ export default function Dashboard() {
         : `Please review PR #${prNumber}`,
     };
     if (model) params.model = model;
-    setLastParams(params);
     setCreating(true);
     setCreateError(null);
     try {
       await sessionsService.create(params);
       setFormKey((k) => k + 1);
+      return true;
     } catch (err) {
       setCreateError(err?.message ?? 'Failed to create review session');
+      return false;
     } finally {
       setCreating(false);
     }
@@ -217,7 +218,7 @@ export default function Dashboard() {
 
       <div className="relative bg-zinc-900 border border-zinc-800 rounded-lg p-4 sm:p-6 mb-4 sm:mb-6">
         {creating && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-950/80 backdrop-blur-sm">
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-zinc-950/80 backdrop-blur-sm">
             <div className="flex flex-col items-center gap-3">
               <Loader2 className="w-10 h-10 animate-spin text-amber-400" />
               <p className="text-sm font-medium text-zinc-100">
@@ -240,19 +241,6 @@ export default function Dashboard() {
                 &times;
               </button>
             </div>
-            {lastParams && (
-              <button
-                onClick={() =>
-                  agentType === 'reviewer'
-                    ? handleCreateReviewer(lastParams)
-                    : handleCreate(lastParams)
-                }
-                disabled={creating}
-                className="mt-2 bg-red-800/50 hover:bg-red-700/50 disabled:opacity-50 text-red-200 px-3 py-1 rounded text-xs font-medium transition-colors"
-              >
-                {creating ? 'Retrying...' : 'Retry'}
-              </button>
-            )}
           </div>
         )}
 
