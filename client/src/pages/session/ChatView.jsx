@@ -22,6 +22,7 @@ import { isMobile } from '../../utils/isMobile.js';
 import { usePersistentState } from '../../hooks/usePersistentState.js';
 import ApprovalInline from '../../components/ApprovalInline.jsx';
 import MergeConfirmModal from '../../components/MergeConfirmModal.jsx';
+import PushConfirmModal from '../../components/PushConfirmModal.jsx';
 import Tooltip from '../../components/Tooltip.jsx';
 
 /** "Check comments" quick message for builder sessions — must stay aligned with `## Responding to PR feedback` in `server/prompts/build-prompt.md` (injected via session prompt; do not duplicate that section here). */
@@ -96,6 +97,7 @@ export default function ChatView({
   const [merging, setMerging] = useState(false);
   const [mergeError, setMergeError] = useState(null);
   const [pushing, setPushing] = useState(false);
+  const [showPushModal, setShowPushModal] = useState(false);
   const [restoring, setRestoring] = useState(false);
 
   const isRunning = session?.status === 'running';
@@ -120,8 +122,9 @@ export default function ChatView({
     });
   };
 
-  const handlePush = async () => {
+  const handlePushConfirmed = async () => {
     if (!session?.id || pushing) return;
+    setShowPushModal(false);
     setPushing(true);
     try {
       await sessionsService.push(session.id);
@@ -136,6 +139,11 @@ export default function ChatView({
     } finally {
       setPushing(false);
     }
+  };
+
+  const handlePush = () => {
+    if (!session?.id || pushing) return;
+    setShowPushModal(true);
   };
 
   const handleRestore = async () => {
@@ -501,6 +509,17 @@ export default function ChatView({
           </form>
         )}
       </div>
+      {showPushModal && (
+        <PushConfirmModal
+          commitsToPush={commitsToPush}
+          onConfirm={handlePushConfirmed}
+          onCancel={() => setShowPushModal(false)}
+          onEditDetails={() => {
+            setShowPushModal(false);
+            onViewChange?.('edit');
+          }}
+        />
+      )}
       {showMergeModal && (
         <MergeConfirmModal
           prNumber={session?.pr_number}

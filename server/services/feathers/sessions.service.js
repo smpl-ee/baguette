@@ -288,6 +288,16 @@ export class SessionsService extends KnexService {
     return { ok: true };
   }
 
+  async getPrDetails(data, params) {
+    const session = params.resolvedSession;
+    if (!session?.pr_number) throw new BadRequest('Session has no PR');
+    const user = await this.app.service('users').get(session.user_id, {});
+    const token = getEffectiveGithubToken(user);
+    if (!token) throw new BadRequest('No GitHub token configured');
+    const pr = await getOpenPRByNumber(token, session.repo_full_name, session.pr_number);
+    return { title: pr.title, body: pr.body ?? '' };
+  }
+
   async restore(data, params) {
     const session = params.resolvedSession;
     if (!session.archived_at) {
@@ -639,6 +649,7 @@ export function registerSessionsService(app, path = 'sessions') {
       'merge',
       'push',
       'restore',
+      'getPrDetails',
     ],
   });
   app.service(path).hooks(sessionsHooks);
@@ -671,6 +682,7 @@ export const sessionsHooks = {
     merge: [resolveSessionFromData],
     push: [resolveSessionFromData],
     restore: [resolveSessionFromData],
+    getPrDetails: [resolveSessionFromData],
     resolvePermission: [requireUser],
   },
   after: {

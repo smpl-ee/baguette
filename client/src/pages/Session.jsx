@@ -14,6 +14,7 @@ import {
   Copy,
   Archive,
   PanelLeft,
+  Pencil,
 } from 'lucide-react';
 import { useSessionsContext } from '../context/SessionsContext.jsx';
 import { useFilters } from '../context/FilterContext.jsx';
@@ -32,6 +33,7 @@ import ArchiveSession from '../components/ArchiveSession.jsx';
 import ChatView from './session/ChatView.jsx';
 import DiffView from './session/DiffView.jsx';
 import LogsView from './session/LogsView.jsx';
+import EditView from './session/EditView.jsx';
 import PrStatusBadge from '../components/PrStatusBadge.jsx';
 
 /**
@@ -239,6 +241,7 @@ const VIEWS = [
   { id: 'chat', label: 'Chat', Icon: MessageSquare },
   { id: 'diff', label: 'Diff', Icon: FolderOpen },
   { id: 'logs', label: 'Logs', Icon: ScrollText },
+  { id: 'edit', label: 'Edit', Icon: Pencil },
 ];
 
 export default function Session() {
@@ -786,19 +789,20 @@ export default function Session() {
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {/* View tabs — only above chat/diff/logs + tasks */}
-          <div className="flex shrink-0 items-center gap-1 border-b border-zinc-800 bg-zinc-900 px-3 sm:px-4">
+          <div className="flex shrink-0 items-center border-b border-zinc-800 bg-zinc-900 px-3 sm:px-4">
             <button
               onClick={() => setShowSidebar((v) => !v)}
-              className="items-center justify-center mr-1 text-zinc-500 hover:text-zinc-300 transition-colors"
+              className="items-center justify-center mr-1 shrink-0 text-zinc-500 hover:text-zinc-300 transition-colors"
               title={showSidebar ? 'Hide sidebar' : 'Show sidebar'}
             >
               <PanelLeft className="w-4 h-4" />
             </button>
+            <div className="flex overflow-x-auto gap-1 min-w-0 flex-1 scrollbar-none">
             {VIEWS.map(({ id, label, Icon }) => (
               <button
                 key={id}
                 onClick={() => setView(id)}
-                className={`flex items-center gap-1.5 border-b-2 px-3 py-2 text-xs font-medium transition-colors -mb-px ${
+                className={`flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 text-xs font-medium transition-colors -mb-px ${
                   activeView === id
                     ? 'border-amber-500 text-amber-400'
                     : 'border-transparent text-zinc-500 hover:text-zinc-300'
@@ -808,8 +812,9 @@ export default function Session() {
                 {label}
               </button>
             ))}
+            </div>
             {!isReadonly && session?.pr_status !== 'merged' && (
-              <div className="ml-auto flex items-center gap-1.5 py-2 pr-1">
+              <div className="ml-auto shrink-0 flex items-center gap-1.5 py-2 pl-2">
                 <span className="text-xs text-zinc-500">Auto-push</span>
                 <button
                   type="button"
@@ -857,6 +862,7 @@ export default function Session() {
             {activeView === 'logs' && (
               <LogsView rawMessages={rawMessages} loadMore={loadMore} loadingMore={loadingMore} />
             )}
+            {activeView === 'edit' && <EditView session={session} />}
           </div>
         </div>
 
