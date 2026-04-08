@@ -23,7 +23,7 @@ async function waitFor(pred, { timeoutMs = 5_000, intervalMs = 50, msg = '' } = 
 
 describe('Task kill integration', () => {
   it(
-    'kill() delivers SIGTERM to exec listener script; forceKill() ends the process',
+    'kill() delivers SIGTERM to listener script via process group; forceKill() ends the process',
     async () => {
       const task = new Task({
         id: 1,

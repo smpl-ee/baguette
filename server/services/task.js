@@ -81,9 +81,10 @@ export class Task {
       await writeFile(scriptPath, `#!/bin/sh\nset -e\n${this.command}\n`, 'utf8');
     }
 
+    const spawnOpts = { cwd, env: fullEnv, stdio: ['pipe', 'pipe', 'pipe'], detached: true };
     const child = scriptPath
-      ? spawn('sh', [scriptPath], { cwd, env: fullEnv, stdio: ['pipe', 'pipe', 'pipe'] })
-      : spawn('sh', ['-c', this.command], { cwd, env: fullEnv, stdio: ['pipe', 'pipe', 'pipe'] });
+      ? spawn('sh', [scriptPath], spawnOpts)
+      : spawn('sh', ['-c', this.command], spawnOpts);
 
     this.pid = child.pid;
     this.#process = child;
@@ -136,6 +137,16 @@ export class Task {
     });
   }
 
+  #killProcessGroup(signal) {
+    if (!this.#process) return;
+    try {
+      process.kill(-this.#process.pid, signal);
+    } catch {
+      // Fall back to killing just the process (e.g. if pgid no longer exists)
+      try { this.#process.kill(signal); } catch { /* already gone */ }
+    }
+  }
+
   /**
    * Send SIGTERM; escalate to SIGKILL after 5 s if still running; await until the child exits or `timeoutMs`.
    * @returns {Promise<boolean>} true if a signal was sent, false if already exited/no process.
@@ -144,10 +155,10 @@ export class Task {
     if (this.status !== 'running' || !this.#process) {
       return false;
     }
-    this.#process.kill('SIGTERM');
+    this.#killProcessGroup('SIGTERM');
     const escalation = setTimeout(() => {
       if (this.status === 'running' && this.#process) {
-        this.#process.kill('SIGKILL');
+        this.#killProcessGroup('SIGKILL');
       }
     }, 10000);
     try {
@@ -161,11 +172,7 @@ export class Task {
   /** Force-kill immediately (SIGKILL). */
   forceKill() {
     if (this.#process) {
-      try {
-        this.#process.kill('SIGKILL');
-      } catch {
-        /* process may already be gone */
-      }
+      this.#killProcessGroup('SIGKILL');
     }
   }
 
