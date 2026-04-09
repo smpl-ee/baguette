@@ -22,6 +22,7 @@ vi.mock('../github.js', () => ({
   gitFetch: vi.fn(),
   upsertPR: vi.fn(),
   getOpenPR: vi.fn().mockResolvedValue(null),
+  getOpenPRByNumber: vi.fn().mockResolvedValue({ title: 'PR title', body: 'PR body' }),
   getPRComments: vi.fn(),
   createPRComment: vi.fn(),
   createPRLineComment: vi.fn(),
@@ -54,6 +55,7 @@ import {
   gitFetch,
   upsertPR,
   getOpenPR,
+  getOpenPRByNumber,
   getPRComments,
   createPRComment,
   createPRLineComment,
@@ -185,6 +187,25 @@ describe('PrRead', () => {
     const { tools } = buildServer({ remote_branch: null, created_branch: 'created-branch' });
     const result = parseResult(await callTool(tools, 'PrRead'));
     expect(result.branch).toBe('created-branch');
+  });
+
+  it('returns title and description fetched from GitHub when PR exists', async () => {
+    getOpenPRByNumber.mockResolvedValueOnce({ title: 'GitHub PR title', body: 'GitHub PR body' });
+    const { tools } = buildServer({
+      pr_url: 'https://github.com/owner/repo/pull/42',
+      pr_number: 42,
+    });
+    const result = parseResult(await callTool(tools, 'PrRead'));
+    expect(result.title).toBe('GitHub PR title');
+    expect(result.description).toBe('GitHub PR body');
+    expect(getOpenPRByNumber).toHaveBeenCalledWith('ghtoken', 'owner/repo', 42);
+  });
+
+  it('returns null title and description when no PR exists', async () => {
+    const { tools } = buildServer({ pr_url: null, pr_number: null });
+    const result = parseResult(await callTool(tools, 'PrRead'));
+    expect(result.title).toBeNull();
+    expect(result.description).toBeNull();
   });
 });
 

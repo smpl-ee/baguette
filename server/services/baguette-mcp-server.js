@@ -9,6 +9,7 @@ import {
   gitFetch,
   upsertPR,
   getOpenPR,
+  getOpenPRByNumber,
   getPRComments,
   createPRComment,
   createPRLineComment,
@@ -181,15 +182,24 @@ export function buildBaguetteMcpServer(session, app) {
         }
       ),
 
-      tool('PrRead', 'Get the current PR info: URL, number, and branch.', {}, async () => {
+      tool('PrRead', 'Get the current PR info: URL, number, branch, title, and description.', {}, async () => {
         const result = {
           pr_url: session?.pr_url ?? null,
           pr_number: session?.pr_number ?? null,
           branch: session?.remote_branch || session?.created_branch || null,
+          title: null,
+          description: null,
         };
         if (!result.pr_url) {
           result.message =
             'No pull request exists yet. Push your changes first with GitPush, then create one with PrUpsert.';
+          return ok(result);
+        }
+        const token = await getToken();
+        if (token && session.pr_number) {
+          const pr = await getOpenPRByNumber(token, session.repo_full_name, session.pr_number);
+          result.title = pr.title;
+          result.description = pr.body;
         }
         return ok(result);
       }),
