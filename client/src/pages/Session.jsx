@@ -562,14 +562,21 @@ export default function Session() {
                   </span>
                 )}
                 {session.preview_url && (
-                  <a
-                    href={session.preview_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="shrink-0 text-sky-400 hover:text-sky-300"
-                  >
-                    Preview
-                  </a>
+                  <span className="shrink-0 flex items-center gap-1">
+                    <a
+                      href={session.preview_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sky-400 hover:text-sky-300"
+                    >
+                      Preview
+                    </a>
+                    {session.is_preview_public && (
+                      <span className="text-[10px] text-amber-400 border border-amber-500/30 rounded px-1 py-0.5 leading-none">
+                        public
+                      </span>
+                    )}
+                  </span>
                 )}
               </div>
             </div>

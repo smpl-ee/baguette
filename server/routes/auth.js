@@ -177,7 +177,6 @@ export function createAuthRoutes(app) {
     const userId = req.signedCookies?.userId;
     const { session: shortId } = req.query;
 
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
     if (!shortId) return res.status(400).json({ error: 'Missing session parameter' });
 
     const session = await db('sessions')
@@ -185,8 +184,13 @@ export function createAuthRoutes(app) {
       .whereNull('archived_at')
       .first();
     if (!session) return res.status(404).json({ error: 'Session not found' });
-    if (String(session.user_id) !== String(userId))
-      return res.status(403).json({ error: 'Forbidden' });
+
+    // Public previews are accessible to anyone; private previews require the owner
+    if (!session.is_preview_public) {
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+      if (String(session.user_id) !== String(userId))
+        return res.status(403).json({ error: 'Forbidden' });
+    }
 
     const token = signPreviewToken(shortId);
     const url = new URL('/_baguette/auth', getPreviewHost(shortId));
