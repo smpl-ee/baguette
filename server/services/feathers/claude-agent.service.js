@@ -289,7 +289,7 @@ export class ClaudeAgentService {
 
       // Auto-approve everything in bypass mode, except ExitPlanMode which must always be reviewed
       if (
-        sessionSettings?.permissionMode === 'bypassPermissions' &&
+        sessionSettings?.bypassPermissions &&
         toolName !== 'ExitPlanMode'
       ) {
         return { behavior: 'allow', updatedInput: input };
@@ -377,6 +377,7 @@ export class ClaudeAgentService {
 
     const sessionSettings = {
       permissionMode: sessionRow.plan_mode ? 'plan' : sessionRow.permission_mode,
+      bypassPermissions: sessionRow.permission_mode === 'bypassPermissions',
     };
     const canUseTool = isReviewer
       ? this.createReviewerCanUseTool(
@@ -594,6 +595,7 @@ export class ClaudeAgentService {
     const effectiveMode = sessionRow.plan_mode ? 'plan' : sessionRow.permission_mode;
     if (session.sessionSettings) {
       session.sessionSettings.permissionMode = effectiveMode;
+      session.sessionSettings.bypassPermissions = sessionRow.permission_mode === 'bypassPermissions';
     }
     // For bypassPermissions, use acceptEdits as the SDK-level mode — full bypass is handled
     // in canUseTool which auto-approves all tool calls when permissionMode is bypassPermissions.
@@ -603,7 +605,7 @@ export class ClaudeAgentService {
     session.queryInstance.setModel(sessionRow.model);
 
     // When switching to bypass mode, auto-approve any pending approvals (except ExitPlanMode)
-    if (effectiveMode === 'bypassPermissions' && session.permissionRequests?.size > 0) {
+    if (sessionRow.permission_mode === 'bypassPermissions' && session.permissionRequests?.size > 0) {
       for (const [requestId, entry] of session.permissionRequests) {
         if (entry.toolName === 'ExitPlanMode') continue;
         entry.resolve({ approved: true });
