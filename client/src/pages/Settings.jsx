@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { toastError } from '../utils/toastError.jsx';
 import { apiFetch } from '../api.js';
@@ -6,6 +6,7 @@ import { usersService, reposService, userReposService } from '../feathers.js';
 import { useAuth } from '../hooks/useAuth.jsx';
 import { requestNotificationPermission } from '../utils/notifications.js';
 import { useRepoContext } from '../context/RepoContext.jsx';
+import { useDebouncedCallback } from '../hooks/useDebouncedCallback.js';
 import SearchableSelect from '../components/SearchableSelect.jsx';
 
 // ─── RepoSearchInput ──────────────────────────────────────────────────────────
@@ -17,14 +18,6 @@ function RepoSearchInput({ value, onSelect, addedNames, trailing }) {
   const [loadingOrgs, setLoadingOrgs] = useState(true);
   const [loading, setLoading] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
-  const remoteSearchDebounceRef = useRef(null);
-
-  const clearRemoteSearchDebounce = useCallback(() => {
-    if (remoteSearchDebounceRef.current) {
-      clearTimeout(remoteSearchDebounceRef.current);
-      remoteSearchDebounceRef.current = null;
-    }
-  }, []);
 
   const fetchRemoteRepos = useCallback((org, query) => {
     setLoading(true);
@@ -36,33 +29,28 @@ function RepoSearchInput({ value, onSelect, addedNames, trailing }) {
       .finally(() => setLoading(false));
   }, []);
 
+  const [debouncedFetchRepos, cancelDebouncedFetchRepos] = useDebouncedCallback(fetchRemoteRepos, 300);
+
   const loadReposForOrg = useCallback(
     (org) => {
-      clearRemoteSearchDebounce();
+      cancelDebouncedFetchRepos();
       setSelectedOrg(org);
       fetchRemoteRepos(org, '');
     },
-    [clearRemoteSearchDebounce, fetchRemoteRepos]
+    [cancelDebouncedFetchRepos, fetchRemoteRepos]
   );
 
   const handleSearchPanelChange = useCallback(
     (panelSearch) => {
-      clearRemoteSearchDebounce();
+      cancelDebouncedFetchRepos();
       if (panelSearch === null || panelSearch === '') {
         fetchRemoteRepos(selectedOrg, '');
         return;
       }
-      remoteSearchDebounceRef.current = setTimeout(() => {
-        remoteSearchDebounceRef.current = null;
-        fetchRemoteRepos(selectedOrg, panelSearch);
-      }, 300);
+      debouncedFetchRepos(selectedOrg, panelSearch);
     },
-    [clearRemoteSearchDebounce, fetchRemoteRepos, selectedOrg]
+    [cancelDebouncedFetchRepos, debouncedFetchRepos, fetchRemoteRepos, selectedOrg]
   );
-
-  useEffect(() => {
-    return () => clearRemoteSearchDebounce();
-  }, [clearRemoteSearchDebounce]);
 
   useEffect(() => {
     reposService
@@ -74,7 +62,7 @@ function RepoSearchInput({ value, onSelect, addedNames, trailing }) {
   }, [loadReposForOrg]);
 
   const handleRefresh = async () => {
-    clearRemoteSearchDebounce();
+    cancelDebouncedFetchRepos();
     await reposService
       .refresh({})
       .catch((err) => toastError('Failed to refresh repositories', err));
