@@ -25,6 +25,7 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
   const [initialPrompt, setInitialPrompt] = persistentState.useState('prompt', defaultPrompt || '');
   const [showMore, setShowMore] = globalState.useState('showMore', false);
   const [createNewBranch, setCreateNewBranch] = persistentState.useState('createNewBranch', true);
+  const [branchName, setBranchName] = persistentState.useState('branchName', '');
   const [autoPush, setAutoPush] = persistentState.useState('autoPush', true);
   const { repos } = useRepoContext();
   const [permissionMode, setPermissionMode] = persistentState.useState('permissionMode', 'default');
@@ -102,60 +103,36 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
     setFileError(null);
   };
 
+  const buildPayload = ({ planMode }) => ({
+    repoFullName,
+    branch,
+    initialPrompt,
+    files,
+    permissionMode,
+    planMode,
+    model: model || undefined,
+    createNewBranch,
+    branchName: branchName || undefined,
+    autoPush,
+    plugins: selectedPlugins.length > 0 ? selectedPlugins : undefined,
+  });
+
   const handleStart = async (e) => {
     e.preventDefault();
     if (!canSubmit) return;
-    const submitted = await onSubmit({
-      repoFullName,
-      branch,
-      initialPrompt,
-      files,
-      permissionMode,
-      planMode: false,
-      model: model || undefined,
-      createNewBranch,
-      autoPush,
-      plugins: selectedPlugins.length > 0 ? selectedPlugins : undefined,
-    });
-    if (submitted) clearForm();
+    if (await onSubmit(buildPayload({ planMode: false }))) clearForm();
   };
 
   const handlePlan = async (e) => {
     e.preventDefault();
     if (!canSubmit) return;
-    const submitted = await onSubmit({
-      repoFullName,
-      branch,
-      initialPrompt,
-      files,
-      permissionMode,
-      planMode: true,
-      model: model || undefined,
-      createNewBranch,
-      autoPush,
-      plugins: selectedPlugins.length > 0 ? selectedPlugins : undefined,
-    });
-    if (submitted) clearForm();
+    if (await onSubmit(buildPayload({ planMode: true }))) clearForm();
   };
 
   const handleKeyDown = async (e) => {
     if (!isMobile() && e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      if (canSubmit) {
-        const submitted = await onSubmit({
-          repoFullName,
-          branch,
-          initialPrompt,
-          files,
-          permissionMode,
-          planMode: false,
-          model: model || undefined,
-          createNewBranch,
-          autoPush,
-          plugins: selectedPlugins.length > 0 ? selectedPlugins : undefined,
-        });
-        if (submitted) clearForm();
-      }
+      if (canSubmit && (await onSubmit(buildPayload({ planMode: false })))) clearForm();
     }
   };
 
@@ -254,6 +231,21 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
 
         {showMore && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mt-3">
+            {createNewBranch && (
+              <div className="sm:col-span-2">
+                <label className="block text-sm font-medium text-zinc-300 mb-1">
+                  Branch name{' '}
+                  <span className="text-zinc-500 font-normal">(optional, auto-generated if empty)</span>
+                </label>
+                <input
+                  type="text"
+                  value={branchName}
+                  onChange={(e) => setBranchName(e.target.value)}
+                  placeholder="my-feature-branch"
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-transparent"
+                />
+              </div>
+            )}
             <div>
               <label className="block text-sm font-medium text-zinc-300 mb-1">Model</label>
               <select

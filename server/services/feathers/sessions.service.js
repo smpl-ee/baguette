@@ -535,13 +535,16 @@ async function prepareSessionEnvironment(context) {
     });
     const branchPrefix = context.params.user?.branch_prefix ?? '';
     const fallbackBranch = `${branchPrefix}task-${shortId}`;
-    let branchName = fallbackBranch;
+    const requestedBranchName = context.data.branch_name;
+    let branchName = requestedBranchName
+      ? `${branchPrefix}${requestedBranchName.toLowerCase().replace(/[^a-z0-9/_.-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')}` || fallbackBranch
+      : fallbackBranch;
     try {
       const result = await context.app
         .service('claude-agent')
         .generateSessionMetadata(context.data.initial_prompt || '', shortId, context.params.user, repo.full_name);
       if (result.label) context.data.label = result.label;
-      branchName = result.branchName ? `${branchPrefix}${result.branchName}` : fallbackBranch;
+      if (!requestedBranchName) branchName = result.branchName ? `${branchPrefix}${result.branchName}` : fallbackBranch;
     } catch (err) {
       logger.error(err, 'Metadata generation error (non-fatal)');
     }

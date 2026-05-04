@@ -143,6 +143,7 @@ export default function Dashboard() {
     planMode,
     model,
     createNewBranch,
+    branchName,
     autoPush,
     plugins,
   }) => {
@@ -156,6 +157,7 @@ export default function Dashboard() {
       auto_push: autoPush ?? true,
     };
     if (model) params.model = model;
+    if (branchName) params.branch_name = branchName;
     if (plugins?.length) params.plugins = plugins;
     if (files?.length) {
       try {
