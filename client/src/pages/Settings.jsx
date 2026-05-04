@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { toastError } from '../utils/toastError.jsx';
 import { apiFetch } from '../api.js';
@@ -6,7 +6,6 @@ import { usersService, reposService, userReposService } from '../feathers.js';
 import { useAuth } from '../hooks/useAuth.jsx';
 import { requestNotificationPermission } from '../utils/notifications.js';
 import { useRepoContext } from '../context/RepoContext.jsx';
-import { useDebouncedCallback } from '../hooks/useDebouncedCallback.js';
 import SearchableSelect from '../components/SearchableSelect.jsx';
 
 // ─── RepoSearchInput ──────────────────────────────────────────────────────────
@@ -14,43 +13,22 @@ import SearchableSelect from '../components/SearchableSelect.jsx';
 function RepoSearchInput({ value, onSelect, addedNames, trailing }) {
   const [orgs, setOrgs] = useState([]);
   const [selectedOrg, setSelectedOrg] = useState('personal');
-  const [orgRepos, setOrgRepos] = useState([]);
   const [loadingOrgs, setLoadingOrgs] = useState(true);
-  const [loading, setLoading] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const addedNamesRef = useRef(addedNames);
+  useEffect(() => {
+    addedNamesRef.current = addedNames;
+  }, [addedNames]);
 
-  const fetchRemoteRepos = useCallback((org, query) => {
-    setLoading(true);
-    setOrgRepos([]);
-    return reposService
-      .findRemote({ org, query })
-      .then((result) => setOrgRepos(result.repos))
-      .catch((err) => toastError('Failed to load repositories', err))
-      .finally(() => setLoading(false));
-  }, []);
-
-  const [debouncedFetchRepos, cancelDebouncedFetchRepos] = useDebouncedCallback(fetchRemoteRepos, 300);
-
-  const loadReposForOrg = useCallback(
-    (org) => {
-      cancelDebouncedFetchRepos();
-      setSelectedOrg(org);
-      fetchRemoteRepos(org, '');
-    },
-    [cancelDebouncedFetchRepos, fetchRemoteRepos]
-  );
-
-  const handleSearchPanelChange = useCallback(
-    (panelSearch) => {
-      cancelDebouncedFetchRepos();
-      if (panelSearch === null || panelSearch === '') {
-        fetchRemoteRepos(selectedOrg, '');
-        return;
-      }
-      debouncedFetchRepos(selectedOrg, panelSearch);
-    },
-    [cancelDebouncedFetchRepos, debouncedFetchRepos, fetchRemoteRepos, selectedOrg]
-  );
+  const getRepoOptions = useCallback(async (query) => {
+    try {
+      const res = await reposService.findRemote({ org: selectedOrg, query });
+      return res.repos.filter((r) => !addedNamesRef.current.has(r.full_name));
+    } catch (err) {
+      toastError('Failed to load repositories', err);
+      return [];
+    }
+  }, [selectedOrg]);
 
   useEffect(() => {
     reposService
@@ -58,11 +36,9 @@ function RepoSearchInput({ value, onSelect, addedNames, trailing }) {
       .then(setOrgs)
       .catch((err) => toastError('Failed to load organizations', err))
       .finally(() => setLoadingOrgs(false));
-    loadReposForOrg('personal');
-  }, [loadReposForOrg]);
+  }, []);
 
   const handleRefresh = async () => {
-    cancelDebouncedFetchRepos();
     await reposService
       .refresh({})
       .catch((err) => toastError('Failed to refresh repositories', err));
@@ -75,10 +51,8 @@ function RepoSearchInput({ value, onSelect, addedNames, trailing }) {
       .then(setOrgs)
       .catch((err) => toastError('Failed to load organizations', err))
       .finally(() => setLoadingOrgs(false));
-    loadReposForOrg('personal');
+    setSelectedOrg('personal');
   };
-
-  const availableRepos = orgRepos.filter((r) => !addedNames.has(r.full_name));
 
   return (
     <div className="flex-1">
@@ -89,7 +63,7 @@ function RepoSearchInput({ value, onSelect, addedNames, trailing }) {
             <button
               key={org.login}
               type="button"
-              onClick={() => loadReposForOrg(org.login)}
+              onClick={() => setSelectedOrg(org.login)}
               className={`px-2.5 py-0.5 rounded-full text-xs font-medium transition-colors ${
                 selectedOrg === org.login
                   ? 'bg-amber-500 text-zinc-950'
@@ -106,8 +80,8 @@ function RepoSearchInput({ value, onSelect, addedNames, trailing }) {
             key={refreshKey}
             value={value}
             onChange={onSelect}
-            options={availableRepos}
-            loading={loading}
+            getOptions={getRepoOptions}
+            disabled={loadingOrgs}
             placeholder="Search by name (optional)…"
             loadingText="Loading repositories…"
             emptyText="No repositories found"
@@ -120,14 +94,13 @@ function RepoSearchInput({ value, onSelect, addedNames, trailing }) {
               </div>
             )}
             renderSelected={(r) => <span className="font-mono">{r.full_name}</span>}
-            onSearchPanelChange={handleSearchPanelChange}
           />
         </div>
         <div className="flex gap-2 shrink-0">
           <button
             type="button"
             onClick={handleRefresh}
-            disabled={loading || loadingOrgs}
+            disabled={loadingOrgs}
             title="Clear cache and reload"
             className="inline-flex items-center justify-center text-zinc-500 hover:text-zinc-300 text-sm leading-none px-1 py-2.5 disabled:opacity-40"
           >

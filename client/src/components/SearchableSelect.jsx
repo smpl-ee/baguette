@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useDebouncedCallback } from '../hooks/useDebouncedCallback.js';
 
 const COLOR_CLASSES = {
   amber: { ring: 'focus:ring-amber-500/50', border: 'border-amber-500/50' },
@@ -6,13 +7,50 @@ const COLOR_CLASSES = {
 };
 
 /**
+ * Keeps only loader rows that produce a stable non-empty key and a readable label.
+ * Drops non-arrays, nullish items, duplicates (by string key), and rows where
+ * getOptionValue / getOptionLabel throw.
+ */
+function sanitizeAsyncOptions(list, getOptionValue, getOptionLabel) {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const item of list) {
+    if (item == null) continue;
+    let keyRaw;
+    try {
+      keyRaw = getOptionValue(item);
+    } catch {
+      continue;
+    }
+    if (keyRaw == null) continue;
+    const keyStr = String(keyRaw).trim();
+    if (!keyStr) continue;
+    if (seen.has(keyStr)) continue;
+    try {
+      void getOptionLabel(item);
+    } catch {
+      continue;
+    }
+    seen.add(keyStr);
+    out.push(item);
+  }
+  return out;
+}
+
+/**
  * Searchable select with a text input for filtering and a dropdown list.
  *
  * Props:
  *   value            – currently selected value (from getOptionValue)
  *   onChange(value)  – called with getOptionValue(option) on select, or '' on clear
- *   options          – array of options (strings or objects)
- *   loading          – show loading placeholder and disable input
+ *   options          – static options (ignored when getOptions is set)
+ *   getOptions       – optional async (query: string) => options; enables server-side
+ *                      search with debouncing; query is the current input (may be '').
+ *                      Should return an array; invalid rows (bad shape, duplicate keys,
+ *                      getOptionValue/getOptionLabel errors) are dropped.
+ *   getOptionsDebounceMs – debounce for getOptions when query is non-empty (default 300)
+ *   loading          – external loading (e.g. parent fetching); combined with internal fetch state
  *   disabled         – disable input entirely
  *   color            – 'amber' | 'violet' (default 'amber')
  *   placeholder      – input placeholder when idle
@@ -23,13 +61,13 @@ const COLOR_CLASSES = {
  *   getOptionLabel   – (option) => string for filtering — default: String(option)
  *   renderOption     – (option) => ReactNode for dropdown row — default: getOptionLabel
  *   renderSelected   – (option) => ReactNode for selected display — default: getOptionLabel
- *   onSearchPanelChange – (query: string | null) => void — `null` when the panel is closed;
- *                        when open, the current filter string (possibly ''). Omit to disable.
  */
 export default function SearchableSelect({
   value,
   onChange,
   options = [],
+  getOptions,
+  getOptionsDebounceMs = 300,
   loading = false,
   disabled = false,
   color = 'amber',
@@ -41,12 +79,75 @@ export default function SearchableSelect({
   getOptionLabel = (o) => String(o),
   renderOption,
   renderSelected,
-  onSearchPanelChange,
 }) {
   const [search, setSearch] = useState(null); // null means search is closed
+  const [fetchedOptions, setFetchedOptions] = useState([]);
+  const [asyncLoading, setAsyncLoading] = useState(false);
   const rootRef = useRef(null);
   const inputRef = useRef(null);
+  const requestIdRef = useRef(0);
+  const getOptionsRef = useRef(getOptions);
+  const getOptionValueRef = useRef(getOptionValue);
+  const getOptionLabelRef = useRef(getOptionLabel);
   const { ring, border } = COLOR_CLASSES[color] ?? COLOR_CLASSES.amber;
+
+  useEffect(() => {
+    getOptionsRef.current = getOptions;
+  }, [getOptions]);
+
+  useEffect(() => {
+    getOptionValueRef.current = getOptionValue;
+    getOptionLabelRef.current = getOptionLabel;
+  }, [getOptionValue, getOptionLabel]);
+
+  const fetchForQuery = useCallback(async (query) => {
+    const loader = getOptionsRef.current;
+    if (!loader) return;
+    const id = ++requestIdRef.current;
+    setAsyncLoading(true);
+    try {
+      const list = await loader(query);
+      if (id !== requestIdRef.current) return;
+      setFetchedOptions(
+        sanitizeAsyncOptions(list, getOptionValueRef.current, getOptionLabelRef.current)
+      );
+    } catch {
+      if (id !== requestIdRef.current) return;
+      setFetchedOptions([]);
+    } finally {
+      if (id === requestIdRef.current) setAsyncLoading(false);
+    }
+  }, []);
+
+  const [debouncedFetch, cancelDebouncedFetch] = useDebouncedCallback((q) => {
+    void fetchForQuery(q);
+  }, getOptionsDebounceMs);
+
+  useEffect(() => {
+    return () => {
+      requestIdRef.current += 1;
+      cancelDebouncedFetch();
+    };
+  }, [cancelDebouncedFetch]);
+
+  /** When the async loader identity changes (e.g. org), refetch if the panel is open. */
+  useEffect(() => {
+    if (!getOptions || search === null) return;
+    cancelDebouncedFetch();
+    void fetchForQuery(search);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when getOptions identity changes, not on each keystroke
+  }, [getOptions]);
+
+  const listSource = getOptions ? fetchedOptions : options;
+  const effectiveLoading = loading || (getOptions && asyncLoading);
+
+  const filteredOptions = getOptions
+    ? listSource
+    : listSource.filter(
+        (o) => !search || getOptionLabel(o).toLowerCase().includes(search.toLowerCase())
+      );
+
+  const selectedItem = value ? listSource.find((o) => getOptionValue(o) === value) : null;
 
   useEffect(() => {
     if (search === null) return;
@@ -54,26 +155,20 @@ export default function SearchableSelect({
     const onMouseDown = (e) => {
       if (rootRef.current && !rootRef.current.contains(e.target)) {
         setSearch(null);
-        onSearchPanelChange?.(null);
+        cancelDebouncedFetch();
       }
     };
 
     document.addEventListener('mousedown', onMouseDown);
     return () => document.removeEventListener('mousedown', onMouseDown);
-  }, [search, onSearchPanelChange]);
-
-  const selectedItem = value ? options.find((o) => getOptionValue(o) === value) : null;
-
-  const filteredOptions = options.filter(
-    (o) => !search || getOptionLabel(o).toLowerCase().includes(search.toLowerCase())
-  );
+  }, [search, cancelDebouncedFetch]);
 
   const inputPlaceholder =
     disabled && disabledText
       ? disabledText
-      : loading
+      : effectiveLoading
         ? loadingText
-        : options.length === 0
+        : listSource.length === 0
           ? emptyText
           : placeholder;
 
@@ -88,8 +183,22 @@ export default function SearchableSelect({
 
   const openSearchAndFocus = () => {
     setSearch('');
-    onSearchPanelChange?.('');
+    if (getOptions) {
+      cancelDebouncedFetch();
+      void fetchForQuery('');
+    }
     requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
+  const handleInputChange = (next) => {
+    setSearch(next);
+    if (!getOptions) return;
+    if (next === '') {
+      cancelDebouncedFetch();
+      void fetchForQuery('');
+    } else {
+      debouncedFetch(next);
+    }
   };
 
   return (
@@ -99,19 +208,18 @@ export default function SearchableSelect({
           ref={inputRef}
           type="text"
           value={search ?? ''}
-          onChange={(e) => {
-            const next = e.target.value;
-            setSearch(next);
-            onSearchPanelChange?.(next);
-          }}
+          onChange={(e) => handleInputChange(e.target.value)}
           onClick={() => {
             if (search === null) {
               setSearch('');
-              onSearchPanelChange?.('');
+              if (getOptions) {
+                cancelDebouncedFetch();
+                void fetchForQuery('');
+              }
             }
           }}
           placeholder={inputPlaceholder}
-          disabled={disabled || loading}
+          disabled={disabled || effectiveLoading}
           className={`w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2.5 text-sm text-white placeholder-zinc-500 focus:border-transparent focus:outline-none focus:ring-2 ${ring} disabled:opacity-50 ${
             showClosedSelected
               ? 'absolute inset-0 z-0 min-h-10.5 opacity-0 pointer-events-none'
@@ -142,7 +250,7 @@ export default function SearchableSelect({
         }`}
       >
         {!disabled &&
-          !loading &&
+          !effectiveLoading &&
           filteredOptions.map((o) => (
             <button
               key={getOptionValue(o)}
@@ -150,7 +258,7 @@ export default function SearchableSelect({
               onClick={() => {
                 onChange(getOptionValue(o));
                 setSearch(null);
-                onSearchPanelChange?.(null);
+                cancelDebouncedFetch();
               }}
               className="w-full text-left px-3 py-2.5 text-sm text-white hover:bg-zinc-700 transition-colors"
             >
