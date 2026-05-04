@@ -8,8 +8,11 @@ import { useCallback, useEffect, useRef } from 'react';
  */
 export function useDebouncedCallback(fn, delayMs) {
   const fnRef = useRef(fn);
-  fnRef.current = fn;
   const idRef = useRef(null);
+
+  useEffect(() => {
+    fnRef.current = fn;
+  }, [fn]);
 
   const cancel = useCallback(() => {
     if (idRef.current != null) {
