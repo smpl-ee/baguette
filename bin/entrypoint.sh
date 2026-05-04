@@ -17,8 +17,14 @@ fi
 # The host mounts /var/run/docker.sock; its GID reflects the host's docker group.
 if [ -S /var/run/docker.sock ]; then
     DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
-    groupmod -g "$DOCKER_GID" docker
-    usermod -aG docker baguette
+    if [ "$DOCKER_GID" -eq 0 ]; then
+        # Socket is root:root (common with Docker Desktop bind-mounts). GID 0 is the root
+        # group — we cannot `groupmod -g 0 docker` — add baguette to root so it can use the socket.
+        usermod -aG root baguette
+    else
+        groupmod -g "$DOCKER_GID" docker
+        usermod -aG docker baguette
+    fi
 
     # Ensure a compose file exists so docker-compose can create the default network.
     if [ ! -f /data/docker-compose.yml ]; then
