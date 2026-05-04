@@ -16,6 +16,7 @@ export default function EditView({ session }) {
     setLabel(session.label ?? '');
     setDescription(session.pr_description ?? '');
     setDirty(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-hydrate only when switching sessions
   }, [session?.id]);
 
   const handleSave = async () => {

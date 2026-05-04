@@ -50,6 +50,7 @@ function sanitizeAsyncOptions(list, getOptionValue, getOptionLabel) {
  *                      Should return an array; invalid rows (bad shape, duplicate keys,
  *                      getOptionValue/getOptionLabel errors) are dropped.
  *   getOptionsDebounceMs – debounce for getOptions when query is non-empty (default 300)
+ *   asyncRefetchKey  – when getOptions is set, changing this value refetches the open panel (e.g. org id)
  *   loading          – external loading (e.g. parent fetching); combined with internal fetch state
  *   disabled         – disable input entirely
  *   color            – 'amber' | 'violet' (default 'amber')
@@ -68,6 +69,7 @@ export default function SearchableSelect({
   options = [],
   getOptions,
   getOptionsDebounceMs = 300,
+  asyncRefetchKey,
   loading = false,
   disabled = false,
   color = 'amber',
@@ -93,12 +95,9 @@ export default function SearchableSelect({
 
   useEffect(() => {
     getOptionsRef.current = getOptions;
-  }, [getOptions]);
-
-  useEffect(() => {
     getOptionValueRef.current = getOptionValue;
     getOptionLabelRef.current = getOptionLabel;
-  }, [getOptionValue, getOptionLabel]);
+  }, [getOptions, getOptionValue, getOptionLabel]);
 
   const fetchForQuery = useCallback(async (query) => {
     const loader = getOptionsRef.current;
@@ -130,16 +129,18 @@ export default function SearchableSelect({
     };
   }, [cancelDebouncedFetch]);
 
-  /** When the async loader identity changes (e.g. org), refetch if the panel is open. */
+  /** When the parent scope changes (e.g. selected org), refetch the open panel — keyed, not getOptions reference. */
   useEffect(() => {
-    if (!getOptions || search === null) return;
+    if (!getOptions || asyncRefetchKey === undefined || search === null) return;
     cancelDebouncedFetch();
     void fetchForQuery(search);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when getOptions identity changes, not on each keystroke
-  }, [getOptions]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally only when asyncRefetchKey changes
+  }, [asyncRefetchKey]);
 
   const listSource = getOptions ? fetchedOptions : options;
-  const effectiveLoading = loading || (getOptions && asyncLoading);
+  /** Parent-driven loading only — never tie this to async fetches: disabling the input steals focus. */
+  const inputDisabled = disabled || loading;
+  const showLoadingPlaceholder = loading || (getOptions && asyncLoading);
 
   const filteredOptions = getOptions
     ? listSource
@@ -166,7 +167,7 @@ export default function SearchableSelect({
   const inputPlaceholder =
     disabled && disabledText
       ? disabledText
-      : effectiveLoading
+      : showLoadingPlaceholder
         ? loadingText
         : listSource.length === 0
           ? emptyText
@@ -209,6 +210,14 @@ export default function SearchableSelect({
           type="text"
           value={search ?? ''}
           onChange={(e) => handleInputChange(e.target.value)}
+          onFocus={() => {
+            if (search !== null) return;
+            setSearch('');
+            if (getOptions) {
+              cancelDebouncedFetch();
+              void fetchForQuery('');
+            }
+          }}
           onClick={() => {
             if (search === null) {
               setSearch('');
@@ -219,7 +228,7 @@ export default function SearchableSelect({
             }
           }}
           placeholder={inputPlaceholder}
-          disabled={disabled || effectiveLoading}
+          disabled={inputDisabled}
           className={`w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2.5 text-sm text-white placeholder-zinc-500 focus:border-transparent focus:outline-none focus:ring-2 ${ring} disabled:opacity-50 ${
             showClosedSelected
               ? 'absolute inset-0 z-0 min-h-10.5 opacity-0 pointer-events-none'
@@ -250,7 +259,7 @@ export default function SearchableSelect({
         }`}
       >
         {!disabled &&
-          !effectiveLoading &&
+          !loading &&
           filteredOptions.map((o) => (
             <button
               key={getOptionValue(o)}

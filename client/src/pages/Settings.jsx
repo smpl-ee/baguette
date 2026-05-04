@@ -81,6 +81,7 @@ function RepoSearchInput({ value, onSelect, addedNames, trailing }) {
             value={value}
             onChange={onSelect}
             getOptions={getRepoOptions}
+            asyncRefetchKey={selectedOrg}
             disabled={loadingOrgs}
             placeholder="Search by name (optional)…"
             loadingText="Loading repositories…"
