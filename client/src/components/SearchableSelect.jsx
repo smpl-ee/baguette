@@ -23,6 +23,8 @@ const COLOR_CLASSES = {
  *   getOptionLabel   – (option) => string for filtering — default: String(option)
  *   renderOption     – (option) => ReactNode for dropdown row — default: getOptionLabel
  *   renderSelected   – (option) => ReactNode for selected display — default: getOptionLabel
+ *   onSearchPanelChange – (query: string | null) => void — `null` when the panel is closed;
+ *                        when open, the current filter string (possibly ''). Omit to disable.
  */
 export default function SearchableSelect({
   value,
@@ -39,6 +41,7 @@ export default function SearchableSelect({
   getOptionLabel = (o) => String(o),
   renderOption,
   renderSelected,
+  onSearchPanelChange,
 }) {
   const [search, setSearch] = useState(null); // null means search is closed
   const rootRef = useRef(null);
@@ -51,12 +54,13 @@ export default function SearchableSelect({
     const onMouseDown = (e) => {
       if (rootRef.current && !rootRef.current.contains(e.target)) {
         setSearch(null);
+        onSearchPanelChange?.(null);
       }
     };
 
     document.addEventListener('mousedown', onMouseDown);
     return () => document.removeEventListener('mousedown', onMouseDown);
-  }, [search]);
+  }, [search, onSearchPanelChange]);
 
   const selectedItem = value ? options.find((o) => getOptionValue(o) === value) : null;
 
@@ -84,6 +88,7 @@ export default function SearchableSelect({
 
   const openSearchAndFocus = () => {
     setSearch('');
+    onSearchPanelChange?.('');
     requestAnimationFrame(() => inputRef.current?.focus());
   };
 
@@ -94,9 +99,16 @@ export default function SearchableSelect({
           ref={inputRef}
           type="text"
           value={search ?? ''}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => {
+            const next = e.target.value;
+            setSearch(next);
+            onSearchPanelChange?.(next);
+          }}
           onClick={() => {
-            if (search === null) setSearch('');
+            if (search === null) {
+              setSearch('');
+              onSearchPanelChange?.('');
+            }
           }}
           placeholder={inputPlaceholder}
           disabled={disabled || loading}
@@ -138,6 +150,7 @@ export default function SearchableSelect({
               onClick={() => {
                 onChange(getOptionValue(o));
                 setSearch(null);
+                onSearchPanelChange?.(null);
               }}
               className="w-full text-left px-3 py-2.5 text-sm text-white hover:bg-zinc-700 transition-colors"
             >

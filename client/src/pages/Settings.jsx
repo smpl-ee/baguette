@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { toastError } from '../utils/toastError.jsx';
 import { apiFetch } from '../api.js';
@@ -17,17 +17,52 @@ function RepoSearchInput({ value, onSelect, addedNames, trailing }) {
   const [loadingOrgs, setLoadingOrgs] = useState(true);
   const [loading, setLoading] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const remoteSearchDebounceRef = useRef(null);
 
-  const loadReposForOrg = useCallback((org) => {
-    setSelectedOrg(org);
+  const clearRemoteSearchDebounce = useCallback(() => {
+    if (remoteSearchDebounceRef.current) {
+      clearTimeout(remoteSearchDebounceRef.current);
+      remoteSearchDebounceRef.current = null;
+    }
+  }, []);
+
+  const fetchRemoteRepos = useCallback((org, query) => {
     setLoading(true);
     setOrgRepos([]);
-    reposService
-      .findRemote({ org })
+    return reposService
+      .findRemote({ org, query })
       .then((result) => setOrgRepos(result.repos))
       .catch((err) => toastError('Failed to load repositories', err))
       .finally(() => setLoading(false));
   }, []);
+
+  const loadReposForOrg = useCallback(
+    (org) => {
+      clearRemoteSearchDebounce();
+      setSelectedOrg(org);
+      fetchRemoteRepos(org, '');
+    },
+    [clearRemoteSearchDebounce, fetchRemoteRepos]
+  );
+
+  const handleSearchPanelChange = useCallback(
+    (panelSearch) => {
+      clearRemoteSearchDebounce();
+      if (panelSearch === null || panelSearch === '') {
+        fetchRemoteRepos(selectedOrg, '');
+        return;
+      }
+      remoteSearchDebounceRef.current = setTimeout(() => {
+        remoteSearchDebounceRef.current = null;
+        fetchRemoteRepos(selectedOrg, panelSearch);
+      }, 300);
+    },
+    [clearRemoteSearchDebounce, fetchRemoteRepos, selectedOrg]
+  );
+
+  useEffect(() => {
+    return () => clearRemoteSearchDebounce();
+  }, [clearRemoteSearchDebounce]);
 
   useEffect(() => {
     reposService
@@ -39,6 +74,7 @@ function RepoSearchInput({ value, onSelect, addedNames, trailing }) {
   }, [loadReposForOrg]);
 
   const handleRefresh = async () => {
+    clearRemoteSearchDebounce();
     await reposService
       .refresh({})
       .catch((err) => toastError('Failed to refresh repositories', err));
@@ -84,7 +120,7 @@ function RepoSearchInput({ value, onSelect, addedNames, trailing }) {
             onChange={onSelect}
             options={availableRepos}
             loading={loading}
-            placeholder="Search repositories…"
+            placeholder="Search by name (optional)…"
             loadingText="Loading repositories…"
             emptyText="No repositories found"
             getOptionValue={(r) => r.full_name}
@@ -96,6 +132,7 @@ function RepoSearchInput({ value, onSelect, addedNames, trailing }) {
               </div>
             )}
             renderSelected={(r) => <span className="font-mono">{r.full_name}</span>}
+            onSearchPanelChange={handleSearchPanelChange}
           />
         </div>
         <div className="flex gap-2 shrink-0">
@@ -111,6 +148,12 @@ function RepoSearchInput({ value, onSelect, addedNames, trailing }) {
           {trailing}
         </div>
       </div>
+      <p className="text-xs text-zinc-500 mt-2 max-w-xl leading-relaxed">
+        Lists up to <span className="text-zinc-400">20</span> repos per load. Empty field shows the 20
+        most recently updated you can access; type a fragment of{' '}
+        <span className="font-mono text-zinc-400">owner/repo</span> to search the full list. Personal
+        is owner and direct collaborator repos only.
+      </p>
     </div>
   );
 }
