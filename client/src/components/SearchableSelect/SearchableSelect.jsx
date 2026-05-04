@@ -1,42 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useDebouncedCallback } from '../hooks/useDebouncedCallback.js';
+import { useSearchableSelectAsync } from './useSearchableSelectAsync.js';
 
 const COLOR_CLASSES = {
   amber: { ring: 'focus:ring-amber-500/50', border: 'border-amber-500/50' },
   violet: { ring: 'focus:ring-violet-500/50', border: 'border-violet-500/50' },
 };
-
-/**
- * Keeps only loader rows that produce a stable non-empty key and a readable label.
- * Drops non-arrays, nullish items, duplicates (by string key), and rows where
- * getOptionValue / getOptionLabel throw.
- */
-function sanitizeAsyncOptions(list, getOptionValue, getOptionLabel) {
-  if (!Array.isArray(list)) return [];
-  const seen = new Set();
-  const out = [];
-  for (const item of list) {
-    if (item == null) continue;
-    let keyRaw;
-    try {
-      keyRaw = getOptionValue(item);
-    } catch {
-      continue;
-    }
-    if (keyRaw == null) continue;
-    const keyStr = String(keyRaw).trim();
-    if (!keyStr) continue;
-    if (seen.has(keyStr)) continue;
-    try {
-      void getOptionLabel(item);
-    } catch {
-      continue;
-    }
-    seen.add(keyStr);
-    out.push(item);
-  }
-  return out;
-}
 
 /**
  * Searchable select with a text input for filtering and a dropdown list.
@@ -83,59 +51,30 @@ export default function SearchableSelect({
   renderSelected,
 }) {
   const [search, setSearch] = useState(null); // null means search is closed
-  const [fetchedOptions, setFetchedOptions] = useState([]);
-  const [asyncLoading, setAsyncLoading] = useState(false);
   const rootRef = useRef(null);
   const inputRef = useRef(null);
-  const requestIdRef = useRef(0);
-  const getOptionsRef = useRef(getOptions);
-  const getOptionValueRef = useRef(getOptionValue);
-  const getOptionLabelRef = useRef(getOptionLabel);
   const { ring, border } = COLOR_CLASSES[color] ?? COLOR_CLASSES.amber;
 
-  useEffect(() => {
-    getOptionsRef.current = getOptions;
-    getOptionValueRef.current = getOptionValue;
-    getOptionLabelRef.current = getOptionLabel;
-  }, [getOptions, getOptionValue, getOptionLabel]);
+  const {
+    fetchedOptions,
+    asyncLoading,
+    fetchForQuery,
+    debouncedFetch,
+    cancelDebouncedFetch,
+  } = useSearchableSelectAsync({
+    getOptions,
+    getOptionValue,
+    getOptionLabel,
+    getOptionsDebounceMs,
+    asyncRefetchKey,
+    search,
+  });
 
-  const fetchForQuery = useCallback(async (query) => {
-    const loader = getOptionsRef.current;
-    if (!loader) return;
-    const id = ++requestIdRef.current;
-    setAsyncLoading(true);
-    try {
-      const list = await loader(query);
-      if (id !== requestIdRef.current) return;
-      setFetchedOptions(
-        sanitizeAsyncOptions(list, getOptionValueRef.current, getOptionLabelRef.current)
-      );
-    } catch {
-      if (id !== requestIdRef.current) return;
-      setFetchedOptions([]);
-    } finally {
-      if (id === requestIdRef.current) setAsyncLoading(false);
-    }
-  }, []);
-
-  const [debouncedFetch, cancelDebouncedFetch] = useDebouncedCallback((q) => {
-    void fetchForQuery(q);
-  }, getOptionsDebounceMs);
-
-  useEffect(() => {
-    return () => {
-      requestIdRef.current += 1;
-      cancelDebouncedFetch();
-    };
-  }, [cancelDebouncedFetch]);
-
-  /** When the parent scope changes (e.g. selected org), refetch the open panel — keyed, not getOptions reference. */
-  useEffect(() => {
-    if (!getOptions || asyncRefetchKey === undefined || search === null) return;
+  const primeAsyncEmptyQuery = useCallback(() => {
+    if (!getOptions) return;
     cancelDebouncedFetch();
-    void fetchForQuery(search);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally only when asyncRefetchKey changes
-  }, [asyncRefetchKey]);
+    void fetchForQuery('');
+  }, [getOptions, cancelDebouncedFetch, fetchForQuery]);
 
   const listSource = getOptions ? fetchedOptions : options;
   /** Parent-driven loading only — never tie this to async fetches: disabling the input steals focus. */
@@ -184,10 +123,7 @@ export default function SearchableSelect({
 
   const openSearchAndFocus = () => {
     setSearch('');
-    if (getOptions) {
-      cancelDebouncedFetch();
-      void fetchForQuery('');
-    }
+    primeAsyncEmptyQuery();
     requestAnimationFrame(() => inputRef.current?.focus());
   };
 
@@ -195,8 +131,7 @@ export default function SearchableSelect({
     setSearch(next);
     if (!getOptions) return;
     if (next === '') {
-      cancelDebouncedFetch();
-      void fetchForQuery('');
+      primeAsyncEmptyQuery();
     } else {
       debouncedFetch(next);
     }
@@ -213,18 +148,12 @@ export default function SearchableSelect({
           onFocus={() => {
             if (search !== null) return;
             setSearch('');
-            if (getOptions) {
-              cancelDebouncedFetch();
-              void fetchForQuery('');
-            }
+            primeAsyncEmptyQuery();
           }}
           onClick={() => {
             if (search === null) {
               setSearch('');
-              if (getOptions) {
-                cancelDebouncedFetch();
-                void fetchForQuery('');
-              }
+              primeAsyncEmptyQuery();
             }
           }}
           placeholder={inputPlaceholder}
