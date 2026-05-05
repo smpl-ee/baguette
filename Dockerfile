@@ -54,7 +54,10 @@ RUN curl -fsSL https://mise.jdx.dev/gpg-key.pub | gpg --dearmor > /usr/share/key
     && apt-get update && apt-get install -y mise && rm -rf /var/lib/apt/lists/*
 
 
-RUN npm install -g pnpm @anthropic-ai/claude-code
+RUN npm install -g pnpm @anthropic-ai/claude-code playwright
+
+# Install Chromium and its system dependencies for Playwright
+RUN npx playwright install --with-deps chromium
 
 # Rename the existing node user (UID 1000) to baguette; docker-ce creates the docker group automatically
 # so we just ensure baguette is added to it; entrypoint adjusts the GID at runtime when socket is mounted
