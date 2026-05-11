@@ -33,6 +33,28 @@ describe('parsePluginInput', () => {
     });
   });
 
+  it('parses plain repo URL (no /tree/branch), defaults to main', () => {
+    expect(
+      parsePluginInput('https://github.com/forrestchang/andrej-karpathy-skills')
+    ).toEqual({
+      owner: 'forrestchang',
+      repo: 'andrej-karpathy-skills',
+      branch: 'main',
+      pluginPath: '.',
+    });
+  });
+
+  it('parses plain repo URL with trailing slash', () => {
+    expect(
+      parsePluginInput('https://github.com/forrestchang/andrej-karpathy-skills/')
+    ).toEqual({
+      owner: 'forrestchang',
+      repo: 'andrej-karpathy-skills',
+      branch: 'main',
+      pluginPath: '.',
+    });
+  });
+
   it('rejects non-GitHub tree URLs', () => {
     expect(() => parsePluginInput('https://gitlab.com/a/b/tree/main')).toThrow(/Invalid plugin URL/);
   });

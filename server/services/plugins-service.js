@@ -10,31 +10,48 @@ import { DATA_DIR, resolveDataDirRelativePath } from '../config.js';
 const execFileAsync = promisify(execFile);
 
 /**
- * Parse a full GitHub plugin URL.
- * Accepts: https://github.com/owner/repo/tree/branch[/path/to/plugin]
+ * Parse a GitHub plugin URL.
+ * Accepts:
+ *   https://github.com/owner/repo
+ *   https://github.com/owner/repo/tree/branch[/path/to/plugin]
+ * Plain repo URLs (no /tree/branch) default to the "main" branch.
  * If the path is omitted, the plugin lives at the repo root (path ".").
  * Returns: { owner, repo, branch, pluginPath }
  */
 export function parsePluginInput(input) {
   input = input.trim();
-  const urlMatch = input.match(
+
+  // Try full URL with /tree/branch first
+  const treeMatch = input.match(
     /^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/tree\/([^/]+)(?:\/(.*))?$/
   );
-  if (!urlMatch) {
-    throw new Error(
-      `Invalid plugin URL: "${input}". Expected https://github.com/owner/repo/tree/branch or …/tree/branch/path/to/plugin`
-    );
+  if (treeMatch) {
+    let pluginPath = (treeMatch[4] ?? '').replace(/\/$/, '');
+    if (!pluginPath) pluginPath = '.';
+    return {
+      owner: treeMatch[1],
+      repo: treeMatch[2],
+      branch: treeMatch[3],
+      pluginPath,
+    };
   }
-  let pluginPath = (urlMatch[4] ?? '').replace(/\/$/, '');
-  if (!pluginPath) {
-    pluginPath = '.';
+
+  // Try plain repo URL: https://github.com/owner/repo
+  const repoMatch = input.match(
+    /^https?:\/\/github\.com\/([^/]+)\/([^/]+?)\/?$/
+  );
+  if (repoMatch) {
+    return {
+      owner: repoMatch[1],
+      repo: repoMatch[2],
+      branch: 'main',
+      pluginPath: '.',
+    };
   }
-  return {
-    owner: urlMatch[1],
-    repo: urlMatch[2],
-    branch: urlMatch[3],
-    pluginPath,
-  };
+
+  throw new Error(
+    `Invalid plugin URL: "${input}". Expected https://github.com/owner/repo or …/tree/branch/path/to/plugin`
+  );
 }
 
 /**
@@ -83,11 +100,23 @@ export async function downloadPlugin(owner, repo, branch, pluginPath, token) {
     );
 
     // Check out only the plugin subdirectory
-    await execFileAsync(
-      'git',
-      ['-C', tmpDir, 'sparse-checkout', 'set', '--cone', pluginPath],
-      { timeout: 30000 }
-    );
+    if (pluginPath === '.') {
+      // When the plugin lives at the repo root, disable sparse checkout
+      // so all files (including .claude-plugin/) are materialized.
+      // `sparse-checkout set --cone .` treats "." as a literal dir name
+      // rather than the repo root, which leaves subdirectories missing.
+      await execFileAsync(
+        'git',
+        ['-C', tmpDir, 'sparse-checkout', 'disable'],
+        { timeout: 30000 }
+      );
+    } else {
+      await execFileAsync(
+        'git',
+        ['-C', tmpDir, 'sparse-checkout', 'set', '--cone', pluginPath],
+        { timeout: 30000 }
+      );
+    }
 
     const pluginDir = path.join(tmpDir, pluginPath);
 
