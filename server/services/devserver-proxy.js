@@ -1,28 +1,17 @@
-import net from 'net';
 import http from 'http';
 import cookie from 'cookie';
 import { unsign } from 'cookie-signature';
 import logger from '../logger.js';
 import { extractSessionIdFromHost, verifyPreviewToken } from './preview.js';
 import { PUBLIC_HOST, ENCRYPTION_KEY } from '../config.js';
-import { loadBaguetteConfig } from './baguette-config.js';
+import { loadBaguetteConfig, resolveWebserverConfig } from './baguette-config.js';
+import { isPortListening } from './port-utils.js';
 
 const PREVIEW_COOKIE_TTL = 60 * 60 * 1000; // 1 hour
 
 const STARTUP_TIMEOUT_MS = 1 * 60 * 1000; // 1 minutes
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const POLL_INTERVAL_MS = 1000;
-
-function isPortListening(port) {
-  return new Promise((resolve) => {
-    const socket = net.connect(port, '127.0.0.1');
-    socket.on('connect', () => {
-      socket.destroy();
-      resolve(true);
-    });
-    socket.on('error', () => resolve(false));
-  });
-}
 
 export class DevserverProxy {
   constructor(app) {
@@ -61,7 +50,9 @@ export class DevserverProxy {
       {
         session_id: sessionId,
         command: webserverConfig.command,
+        label: 'baguette:webserver',
         ports: portEnvVars,
+        ...(webserverConfig.taskKey ? { task_key: webserverConfig.taskKey } : {}),
         onLog: (_taskId, _stream, line) => {
           for (const res of state.sseClients) {
             res.write(`event: log\ndata: ${JSON.stringify(line)}\n\n`);
@@ -184,12 +175,12 @@ export class DevserverProxy {
     }
 
     const baguetteConfig = await loadBaguetteConfig(session.worktree_path);
-    if (!baguetteConfig?.webserver) {
+    const webserverConfig = resolveWebserverConfig(baguetteConfig);
+    if (!webserverConfig) {
       socket.destroy();
       return;
     }
 
-    const webserverConfig = baguetteConfig.webserver;
     const sessionId = session.id;
 
     let state = this.devservers.get(sessionId);
@@ -280,7 +271,7 @@ export class DevserverProxy {
   }
 
   async handleRequest(req, res, session, baguetteConfig) {
-    const webserverConfig = baguetteConfig.webserver;
+    const webserverConfig = resolveWebserverConfig(baguetteConfig);
     const sessionId = session.id;
     const previewRoute = `${PUBLIC_HOST}/preview?session=${session.short_id}`;
 

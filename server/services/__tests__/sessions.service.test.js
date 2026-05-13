@@ -202,11 +202,23 @@ describe('Sessions service - custom methods', (hooks) => {
     });
 
     it('returns commands from host config', async () => {
-      loadBaguetteConfig.mockResolvedValue({ session: { commands: ['npm test', 'npm run lint'] } });
+      loadBaguetteConfig.mockResolvedValue({
+        session: {
+          commands: [
+            { label: 'Run tests', run: 'npm test' },
+            { label: 'Lint', run: 'npm run lint' },
+          ],
+        },
+      });
 
       const result = await app.service('sessions').commands(sessId, params({ id: userId }));
 
-      expect(result).toEqual({ commands: ['npm test', 'npm run lint'] });
+      expect(result).toEqual({
+        commands: [
+          { label: 'Run tests', run: 'npm test' },
+          { label: 'Lint', run: 'npm run lint' },
+        ],
+      });
     });
 
     it('returns empty commands when session has no worktree_path', async () => {

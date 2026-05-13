@@ -18,7 +18,7 @@ import {
   getPRWorkflowLogs,
   addReactionToComment,
 } from './github.js';
-import { loadBaguetteConfig, getAvailableCommands } from './baguette-config.js';
+import { loadBaguetteConfig, getAvailableCommands, getAvailableTasks } from './baguette-config.js';
 import loadPrompt from '../prompts/loadPrompt.js';
 import { DOCKER_COMPOSE_PATH, resolveDataDirRelativePath } from '../config.js';
 
@@ -487,23 +487,23 @@ export function buildBaguetteMcpServer(session, app) {
             ),
         },
         async ({ label, args = [] }) => {
-          let commands;
+          let tasks;
           try {
             const cfg = await loadBaguetteConfig(session.worktree_path);
             if (cfg?.error) throw new Error(cfg.error);
-            commands = cfg ? getAvailableCommands(cfg) : null;
+            tasks = cfg ? getAvailableTasks(cfg) : null;
           } catch (err) {
             return fail(err.message);
           }
 
-          if (!commands) return fail('.baguette.yaml not found');
+          if (!tasks) return fail('.baguette.yaml not found');
 
-          const commandConfig = commands.find((c) => c && c.label === label);
-          if (!commandConfig || typeof commandConfig.run !== 'string') {
+          const taskDef = tasks[label];
+          if (!taskDef || typeof taskDef.run !== 'string') {
             return fail(`Unknown command label: ${label}`);
           }
 
-          const combined = `${commandConfig.run} ${args.join(' ')}`.trim();
+          const combined = `${taskDef.run} ${args.join(' ')}`.trim();
           let stdout = '';
           let stderr = '';
 
@@ -515,6 +515,8 @@ export function buildBaguetteMcpServer(session, app) {
                   session_id: session.id,
                   command: combined,
                   label,
+                  ports: taskDef.ports || [],
+                  task_key: label,
                   onLog: (id, stream, data) => {
                     if (stream === 'stdout') stdout += data;
                     else stderr += data;
@@ -532,6 +534,69 @@ export function buildBaguetteMcpServer(session, app) {
               )
               .catch((err) => resolve(fail(err.message)));
           });
+        }
+      ),
+
+      // ── Task lifecycle ──────────────────────────────────────────────────────
+
+      tool(
+        'ListRunningTasks',
+        'List currently running baguette tasks for this session, including their labels and assigned ports.',
+        {},
+        async () => {
+          const tasks = app.service('tasks').filterTasks({
+            sessionIds: new Set([session.id]),
+            status: 'running',
+          });
+          return ok({
+            tasks: tasks.map((t) => ({ id: t.id, label: t.label, status: t.status, ports: t.ports })),
+          });
+        }
+      ),
+
+      tool(
+        'KillTask',
+        'Kill a running baguette task by its ID.',
+        { taskId: z.number().int().describe('Task ID from ListRunningTasks') },
+        async ({ taskId }) => {
+          const task = app.service('tasks').getTask(taskId);
+          if (!task) return fail(`Task ${taskId} not found`);
+          if (task.session_id !== session.id) return fail(`Task ${taskId} does not belong to this session`);
+          const killed = await task.kill();
+          return ok({ killed, taskId });
+        }
+      ),
+
+      tool(
+        'ReadTaskOutput',
+        'Read the log output of a running or exited baguette task. By default returns the last 200 lines. Use offset to read from a specific line position.',
+        {
+          taskId: z.number().int().describe('Task ID from ListRunningTasks'),
+          offset: z
+            .number()
+            .int()
+            .optional()
+            .describe('Line offset to start reading from (0-based). If omitted, reads the last `limit` lines.'),
+          limit: z
+            .number()
+            .int()
+            .optional()
+            .describe('Maximum number of lines to return (default: 200)'),
+        },
+        async ({ taskId, offset, limit = 200 }) => {
+          const task = app.service('tasks').getTask(taskId);
+          if (!task) return fail(`Task ${taskId} not found`);
+          if (task.session_id !== session.id) return fail(`Task ${taskId} does not belong to this session`);
+          const allLines = streamToLines(task.getLogs());
+          const totalLines = allLines.length;
+          let start;
+          if (offset != null) {
+            start = Math.max(0, Math.min(offset, totalLines));
+          } else {
+            start = Math.max(0, totalLines - limit);
+          }
+          const lines = allLines.slice(start, start + limit);
+          return ok({ taskId, totalLines, offset: start, lines });
         }
       ),
 

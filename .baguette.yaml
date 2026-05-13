@@ -11,14 +11,16 @@ config:
     init: |
       pnpm install:all
       pnpm run migrate
-    commands:
-      - label: Run tests
+    tasks:
+      run-tests:
         run: pnpm test
-      - label: Reset database
+      reset-db:
         run: rm -f ./.data/baguette.sqlite3 && pnpm run migrate
+      dev-server:
+        # Starts Express (on $PORT) + Vite dev server (on $VITE_PORT) concurrently.
+        # Vite proxies /api, /auth, /socket.io to Express.
+        run: pnpm run dev
+        ports: [PORT, VITE_PORT]
   webserver:
-    # Starts Express (on $PORT) + Vite dev server (on $VITE_PORT) concurrently.
-    # Vite proxies /api, /auth, /socket.io to Express.
-    command: pnpm run dev
-    ports: [PORT, VITE_PORT]
+    task: dev-server
     expose: VITE_PORT

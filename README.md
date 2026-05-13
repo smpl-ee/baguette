@@ -28,7 +28,7 @@ Baguette is a self-hosted orchestrator for [Claude Code](https://platform.claude
 - **File attachments** -- Attach images and files to any chat message.
 - **Cost tracking** -- Track session costs on session cards, with a daily chart and usage breakdown per repo.
 - **Secrets** -- Inject global secrets into all Claude sessions and tasks via `.baguette.yaml` placeholders.
-- **Session config (`.baguette.yaml`)** -- Define per-session env vars, init commands, and cleanup in your repo.
+- **Session config (`.baguette.yaml`)** -- Define per-session env vars, init commands, tasks with port allocation and dependencies, and cleanup in your repo. See **[docs/project-configuration.md](docs/project-configuration.md)**.
 - **User approval** -- First user is auto-approved; subsequent users require approval from an existing user.
 
 ## Deploy
@@ -97,9 +97,15 @@ The Vite dev server runs on `http://localhost:5173` and proxies API/WebSocket re
 - **Frontend**: Vite, React, Tailwind CSS
 - **AI**: `@anthropic-ai/claude-agent-sdk`
 
+## Configuring your project
+
+Add a `.baguette.yaml` file to your repository root so Baguette can run tests, dev servers, and other tasks across parallel sessions without database or port conflicts. The config defines per-session environment variables, initialization commands, named tasks with automatic port allocation, and a dev server preview.
+
+See **[docs/project-configuration.md](docs/project-configuration.md)** for the full schema, task dependencies, and framework-specific examples.
+
 ## Session management
 
-For details on the data directory layout, git worktree strategy, `.baguette.yaml` session config, and web server preview, see **[docs/session-management.md](docs/session-management.md)**.
+For details on the data directory layout, git worktree strategy, and web server preview, see **[docs/session-management.md](docs/session-management.md)**.
 
 ## Security
 

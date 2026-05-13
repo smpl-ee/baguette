@@ -65,25 +65,105 @@ export function getScriptCommand(block) {
   return lines.join(' && ');
 }
 
-/**
- * Build the full list of available commands from a baguette config.
- * Order: Init (if defined), Dev Server (if defined), then user-defined commands.
- */
-export function getAvailableCommands(baguetteConfig) {
-  const commands = [];
-  const initScript = getScriptCommand(baguetteConfig?.session?.init);
-  if (initScript) commands.push({ label: 'baguette:init', run: initScript });
+const TASK_PORT_REGEX = /\$\{\{\s*baguette\.tasks\.([A-Za-z0-9_:-]+)\.([A-Za-z0-9_]+)\s*\}\}/g;
 
-  const webserver = getWebserverConfig(baguetteConfig);
-  if (webserver?.command) {
-    commands.push({
-      label: 'baguette:webserver',
-      run: webserver.command,
-      ports: webserver.ports || [],
-    });
+/**
+ * Replace `${{ baguette.tasks.<taskKey>.<PORT_NAME> }}` placeholders with actual port numbers.
+ * @param {string} commandStr
+ * @param {Object<string, Object<string, number>>} taskPortMap  e.g. { 'dev-server': { PORT: 54321 } }
+ * @returns {string}
+ */
+export function interpolateTaskPorts(commandStr, taskPortMap) {
+  if (!commandStr || typeof commandStr !== 'string') return commandStr;
+  return commandStr.replace(TASK_PORT_REGEX, (_, taskKey, portName) => {
+    return String(taskPortMap?.[taskKey]?.[portName] ?? '');
+  });
+}
+
+/**
+ * Build a tasks hash from a baguette config.
+ * Returns `{ [taskKey]: { run, ports?, depends_on? } }`.
+ *
+ * Supports both the new `session.tasks` hash format and the legacy `session.commands` array.
+ * Synthesizes `baguette:init` from `session.init` if defined.
+ */
+export function getAvailableTasks(baguetteConfig) {
+  const tasks = {};
+
+  // Init task
+  const initScript = getScriptCommand(baguetteConfig?.session?.init);
+  if (initScript) tasks['baguette:init'] = { run: initScript };
+
+  // User tasks: prefer `tasks` hash, fallback to `commands` array
+  const userTasks = baguetteConfig?.session?.tasks;
+  const userCommands = baguetteConfig?.session?.commands;
+  if (userTasks && typeof userTasks === 'object' && !Array.isArray(userTasks)) {
+    for (const [key, val] of Object.entries(userTasks)) {
+      if (!val || typeof val.run !== 'string') continue;
+      tasks[key] = {
+        run: val.run,
+        ...(val.ports ? { ports: val.ports } : {}),
+        ...(val['depends-on'] ? { depends_on: val['depends-on'] } : {}),
+      };
+    }
+  } else if (Array.isArray(userCommands)) {
+    for (const cmd of userCommands) {
+      if (cmd?.label && cmd?.run) {
+        tasks[cmd.label] = { run: cmd.run, ...(cmd.ports ? { ports: cmd.ports } : {}) };
+      }
+    }
   }
 
-  const base = baguetteConfig?.session?.commands || [];
-  commands.push(...base);
-  return commands;
+  return tasks;
+}
+
+/**
+ * Resolve the webserver block into an effective config.
+ * Supports `webserver.task` (reference to a session task) XOR `webserver.command` (inline).
+ * Returns `{ command, ports, expose, taskKey }` or null if no webserver is configured.
+ */
+export function resolveWebserverConfig(baguetteConfig) {
+  const webserver = getWebserverConfig(baguetteConfig);
+  if (!webserver) return null;
+
+  if (webserver.task && webserver.command) {
+    throw new Error('webserver.task and webserver.command are mutually exclusive');
+  }
+
+  if (webserver.task) {
+    const tasks = getAvailableTasks(baguetteConfig);
+    const taskDef = tasks[webserver.task];
+    if (!taskDef) {
+      throw new Error(`webserver.task "${webserver.task}" not found in session.tasks`);
+    }
+    return {
+      command: taskDef.run,
+      ports: taskDef.ports || [],
+      expose: webserver.expose,
+      taskKey: webserver.task,
+    };
+  }
+
+  if (webserver.command) {
+    return {
+      command: webserver.command,
+      ports: webserver.ports || [],
+      expose: webserver.expose,
+      taskKey: null,
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Build the full list of available commands from a baguette config.
+ * Backward-compatible wrapper around getAvailableTasks().
+ * Returns an array of { label, run, ports? }.
+ */
+export function getAvailableCommands(baguetteConfig) {
+  const tasks = getAvailableTasks(baguetteConfig);
+  return Object.entries(tasks)
+    .filter(([_, t]) => t && typeof t.run === 'string')
+    .map(([key, t]) => ({ label: key, run: t.run, ...(t.ports?.length ? { ports: t.ports } : {}) }));
 }

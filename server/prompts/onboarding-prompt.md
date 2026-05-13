@@ -10,7 +10,7 @@ config:
       # Use ${{ baguette.secrets.SECRET_NAME }} to reference secrets stored in Settings > Secrets.
       # Use ${{ baguette.session.short_id }} to get a unique per-session identifier (useful for DB isolation).
       # Use ${{ baguette.session.public_uri }} to get the public URL where baguette proxies this session's dev server.
-      DATABASE_URL: 'postgres://user:${{ baguette.secrets.DB_PASSWORD }}@localhost:5432/app_${{ baguette.session.short_id }}'
+      DATABASE_URL: 'postgres://user:${{ baguette.secrets.DB_PASSWORD }}@postgres:5432/app_${{ baguette.session.short_id }}'
       NEXT_PUBLIC_APP_URL: '${{ baguette.session.public_uri }}'
       PUBLIC_HOST: '${{ baguette.session.public_uri }}'
     init: |
@@ -24,25 +24,45 @@ config:
     cleanup: |
       # Command run when a session is closed. Use to tear down per-session resources.
       pnpm run db:drop
-    commands:
-      # Quick-launch commands available in the session UI.
-      - label: Run tests
+    tasks:
+      # Named tasks available in the session UI and MCP tools.
+      # Each key is the task name (used as label).
+      run-tests:
         run: pnpm test
+      dev-server:
+        run: pnpm dev --port $VITE_PORT --host 127.0.0.1
+        # List of env var names that baguette will assign free ports to before launching.
+        # The command must use these env vars instead of hardcoded ports.
+        ports: [VITE_PORT, RAILS_PORT]
+      e2e-tests:
+        run: pnpm run e2e --base-url http://127.0.0.1:${{ baguette.tasks.dev-server.VITE_PORT }}
+        # depends-on ensures the dependency task is running and its ports are listening.
+        depends-on: [dev-server]
   webserver:
-    # Command to start the dev server. Must read ports from the env vars listed in ports.
-    command: pnpm dev --port $VITE_PORT
-    # List of env var names that baguette will assign free ports to before launching.
-    # The command must use these env vars instead of hardcoded ports.
-    ports: [VITE_PORT, RAILS_PORT]
+    # Reference a task from session.tasks (recommended). Mutually exclusive with command.
+    task: dev-server
     # Which port env var is the one users access in the browser.
     expose: VITE_PORT
 ```
 
+> **Legacy format**: You can also use an array-based `commands` format instead of `tasks`:
+> ```yaml
+> commands:
+>   - label: Run tests
+>     run: pnpm test
+> ```
+
 ## webserver block fields
 
-- **command**: the shell command to start the dev server. It **must** read the port from an env var (e.g., `--port $VITE_PORT`) rather than a hardcoded port number, because baguette assigns a free port dynamically.
-- **ports**: list of env variable names that baguette will set to free ports before launching the command. Include all ports the server needs (e.g., both a frontend port and an API port). Baguette waits until **all** listed ports are listening before marking the dev server ready.
+- **task**: reference a task key from `session.tasks`. The task's `run` command and `ports` are used to start the dev server.
 - **expose**: which port env var is the one users reach in the browser. Only one port can be exposed.
+
+## tasks block fields
+
+Each task in `session.tasks` supports:
+- **run**: the shell command to execute
+- **ports**: (optional) list of env var names that baguette will assign free ports to before launching
+- **depends-on**: (optional) list of task keys that must be running and listening before this task starts. Dependency ports are available as `${{ baguette.tasks.<task-key>.<PORT_NAME> }}` in the `run` command.
 
 ## Your Task
 
@@ -65,13 +85,13 @@ config:
    - Set `session.init` with commands to install deps, create per-session databases, run migrations, and run seeds (e.g., `rails db:seed`, `pnpm run db:seed`) if a seeding command exists in the project
    - **Prefer `pnpm install` over `npm install` or `yarn install`** to save storage space via pnpm's global content-addressable package cache. If the project uses npm or yarn, add `pnpm = "latest"` to `.mise.toml` to make pnpm available, then use `pnpm install` in the init script.
    - Set `session.cleanup` to tear down per-session databases
-   - Add `session.commands` for running tests and other useful tasks. Always add a **`Reset database`** command that drops and recreates the session database (e.g. `rm -f .data/app.sqlite3 && pnpm run db:migrate` for SQLite, or `dropdb ... && createdb ... && pnpm run db:migrate` for Postgres). This lets Claude quickly reset state during debugging.
+   - Add `session.tasks` for running tests and other useful tasks. Use the hash format where each key is the task name. Always add a **`reset-db`** task that drops and recreates the session database (e.g. `run: rm -f .data/app.sqlite3 && pnpm run db:migrate` for SQLite, or `run: dropdb ... && createdb ... && pnpm run db:migrate` for Postgres). This lets Claude quickly reset state during debugging. Add `ports` to any task that needs dynamically allocated ports.
 
 3. **Configure the webserver block**:
    - Identify how the dev server is started (e.g., `vite`, `next dev`, `rails server`, `python manage.py runserver`)
    - If the start command uses a hardcoded port (e.g., `vite --port 3000`), update it to read from an env var instead (e.g., `vite --port $VITE_PORT`)
    - Update any config files that hardcode the port (e.g., `vite.config.js`, `next.config.js`) to read from `process.env.VITE_PORT` or equivalent
-   - List all port env vars in `ports` and set `expose` to the one users access in the browser. If multiple services must all be up before the app works (e.g., a Vite frontend and a Rails API), list all their ports — baguette waits until every listed port is listening before marking the dev server ready.
+   - Define the dev server as a task in `session.tasks` with `ports`, then reference it with `webserver.task`. Example: `tasks.dev-server: { run: "vite --port $VITE_PORT", ports: [VITE_PORT] }` and `webserver: { task: dev-server, expose: VITE_PORT }`. If multiple services must all be up before the app works (e.g., a Vite frontend and a Rails API), list all their ports on the task — baguette waits until every listed port is listening.
    - **Bind to `127.0.0.1`**: configure the dev server to listen on `127.0.0.1` explicitly, not just `localhost`. When baguette runs in Docker, `localhost` may resolve to `::1` (IPv6) but the proxy connects over IPv4. Pass the appropriate flag for the framework:
      - Vite: `vite --host 127.0.0.1 --port $PORT`
      - Next.js: `next dev -H 127.0.0.1 --port $PORT`
