@@ -422,6 +422,7 @@ export default function Session() {
         command,
         label: label || undefined,
         ports: ports?.length ? ports : undefined,
+        task_key: label || undefined,
       })
       .catch((err) => toastError('Failed to start task', err));
   };
