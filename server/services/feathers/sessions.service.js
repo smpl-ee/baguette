@@ -563,6 +563,8 @@ async function prepareSessionEnvironment(context) {
     context.data.created_branch = branchName;
     context.data.remote_branch = branchName;
   }
+  // Remove transient field that is not a DB column
+  delete context.data.branch_name;
   return context;
 }
 
