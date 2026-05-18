@@ -537,7 +537,7 @@ async function prepareSessionEnvironment(context) {
     const fallbackBranch = `${branchPrefix}task-${shortId}`;
     const requestedBranchName = context.data.branch_name;
     let branchName = requestedBranchName
-      ? `${branchPrefix}${requestedBranchName.toLowerCase().replace(/[^a-z0-9/_.-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')}` || fallbackBranch
+      ? requestedBranchName.toLowerCase().replace(/[^a-z0-9/_.-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || fallbackBranch
       : fallbackBranch;
     try {
       const result = await context.app
