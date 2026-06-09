@@ -287,10 +287,11 @@ export class ClaudeAgentService {
         return { behavior: 'allow', updatedInput: input };
       }
 
-      // Auto-approve everything in bypass mode, except ExitPlanMode which must always be reviewed
+      // Auto-approve everything in bypass mode, except ExitPlanMode and AskUserQuestion which must always be reviewed
       if (
         sessionSettings?.bypassPermissions &&
-        toolName !== 'ExitPlanMode'
+        toolName !== 'ExitPlanMode' &&
+        toolName !== 'AskUserQuestion'
       ) {
         return { behavior: 'allow', updatedInput: input };
       }
@@ -604,10 +605,11 @@ export class ClaudeAgentService {
     );
     session.queryInstance.setModel(sessionRow.model);
 
-    // When switching to bypass mode, auto-approve any pending approvals (except ExitPlanMode)
+    // When switching to bypass mode, auto-approve any pending approvals (except ExitPlanMode and AskUserQuestion)
     if (sessionRow.permission_mode === 'bypassPermissions' && session.permissionRequests?.size > 0) {
       for (const [requestId, entry] of session.permissionRequests) {
         if (entry.toolName === 'ExitPlanMode') continue;
+        if (entry.toolName === 'AskUserQuestion') continue;
         entry.resolve({ approved: true });
         this.app.service('sessions').emit('permission:handled', { requestId, sessionId });
       }

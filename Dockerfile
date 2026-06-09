@@ -54,7 +54,7 @@ RUN curl -fsSL https://mise.jdx.dev/gpg-key.pub | gpg --dearmor > /usr/share/key
     && apt-get update && apt-get install -y mise && rm -rf /var/lib/apt/lists/*
 
 
-RUN npm install -g pnpm @anthropic-ai/claude-code playwright
+RUN npm install -g pnpm @anthropic-ai/claude-code@2.1.169 playwright
 
 # Install Chromium and its system dependencies for Playwright
 RUN npx playwright install --with-deps chromium
