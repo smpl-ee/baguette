@@ -9,13 +9,7 @@ export async function listModels() {
     const q = query({ prompt: '' });
     try {
       const sdkModels = await q.supportedModels();
-      return [
-        ...sdkModels.map((m) => {
-          // Description always start with Name X.Y, let's try to extract the name and version 
-          const displayName = m.description.match(/^([\w\s]+)([\d.]+)/)?.[0] || m.displayName;
-          return { id: m.value, display_name: displayName, description: m.description };
-        }),
-      ];
+      return sdkModels.map((m) => ({ id: m.value, display_name: m.displayName, description: m.description }));
     } finally {
       q.close();
     }
