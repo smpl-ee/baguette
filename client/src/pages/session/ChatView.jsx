@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import {
   AlertCircle,
   GitPullRequest,
@@ -102,6 +102,23 @@ export default function ChatView({
 
   const isRunning = session?.status === 'running';
   const isReviewerSession = session?.agent_type === 'reviewer';
+
+  const displayMessages = useMemo(() => {
+    const result = [];
+    for (const msg of messages) {
+      if (msg.type === 'system' && msg.subtype === 'thinking_tokens') {
+        const last = result[result.length - 1];
+        if (last?.type === 'system' && last?.subtype === 'thinking_tokens') {
+          result[result.length - 1] = msg;
+        } else {
+          result.push(msg);
+        }
+      } else {
+        result.push(msg);
+      }
+    }
+    return result;
+  }, [messages]);
 
   const handleStop = async () => {
     if (!session?.id || stopping) return;
@@ -293,11 +310,11 @@ export default function ChatView({
             </div>
           )}
           {systemPrompt && <SystemPromptEntry content={systemPrompt} />}
-          {messages.map((msg, i) => (
+          {displayMessages.map((msg, i) => (
             <ChatMessage
               key={i}
               message={msg}
-              isLatestMessage={i === messages.length - 1}
+              isLatestMessage={i === displayMessages.length - 1}
               worktreePath={session.absolute_worktree_path}
               sessionId={session.id}
             />

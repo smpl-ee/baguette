@@ -119,6 +119,8 @@ export default function ChatMessage({ message, isLatestMessage, worktreePath, se
   if (message.type === 'system') {
     let label;
     if (message.subtype === 'init') label = 'Session started';
+    else if (message.subtype === 'thinking_tokens')
+      label = `Thinking… ~${(message.estimated_tokens || 0).toLocaleString()} tokens`;
     else if (message.subtype === 'status' && message.status) label = message.status;
     else label = message.subtype;
     return <div className="text-xs text-zinc-600 text-center py-1">{label}</div>;
