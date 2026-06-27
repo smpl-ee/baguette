@@ -28,6 +28,7 @@ RUN apt-get update && apt-get install -y \
     gosu \
     gpg \
     imagemagick \
+    libcurl4-openssl-dev \
     libffi-dev \
     libseccomp-dev \
     libjemalloc2 \
