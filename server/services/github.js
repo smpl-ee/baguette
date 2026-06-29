@@ -209,8 +209,9 @@ export async function createWorktree(repo, branch, worktreeId, token, opts = {})
   const worktreePath = path.join(REPOS_DIR, repo.stripped_name, 'sessions', worktreeId);
   await fs.promises.mkdir(path.dirname(worktreePath), { recursive: true });
 
-  // '+' forces the bare repo's branch ref to match origin even after force-push or diverged cache
-  await gitWithToken(token, ['fetch', 'origin', `+${branch}:${branch}`, '--prune'], {
+  // Fetch to remote-tracking ref to avoid "refusing to fetch into branch checked out at ..."
+  // when another session's worktree already has this branch checked out.
+  await gitWithToken(token, ['fetch', 'origin', `+${branch}:refs/remotes/origin/${branch}`, '--prune'], {
     cwd: barePath,
     stdio: 'pipe',
   });
