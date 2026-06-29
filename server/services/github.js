@@ -889,7 +889,7 @@ export async function upsertPR(token, { repoFullName, prNumber, title, body, hea
   const res = await fetch(`https://api.github.com/repos/${repoFullName}/pulls`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ title, body, head, base: baseBranch }),
+    body: JSON.stringify({ title, body, head, base: baseBranch, draft: true }),
   });
   if (!res.ok) {
     const text = await res.text();

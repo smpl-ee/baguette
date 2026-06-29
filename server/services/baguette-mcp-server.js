@@ -259,7 +259,7 @@ export function buildBaguetteMcpServer(session, app) {
             await patchSession({
               pr_url: pr.url,
               pr_number: pr.number,
-              pr_status: 'open',
+              pr_status: 'draft',
             });
           }
           return ok({ url: pr.url, number: pr.number });
