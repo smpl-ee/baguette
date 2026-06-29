@@ -300,7 +300,7 @@ describe('PrUpsert', () => {
       {
         pr_url: 'https://github.com/owner/repo/pull/1',
         pr_number: 1,
-        pr_status: 'open',
+        pr_status: 'draft',
       },
       INTERNAL_PATCH_PARAMS
     );
