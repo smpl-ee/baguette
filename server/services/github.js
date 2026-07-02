@@ -209,12 +209,23 @@ export async function createWorktree(repo, branch, worktreeId, token, opts = {})
   const worktreePath = path.join(REPOS_DIR, repo.stripped_name, 'sessions', worktreeId);
   await fs.promises.mkdir(path.dirname(worktreePath), { recursive: true });
 
-  // Fetch to remote-tracking ref to avoid "refusing to fetch into branch checked out at ..."
-  // when another session's worktree already has this branch checked out.
-  await gitWithToken(token, ['fetch', 'origin', `+${branch}:refs/remotes/origin/${branch}`, '--prune'], {
+  // Fetch into a session-unique temp ref to:
+  // 1. Avoid "refusing to fetch into branch checked out at ..." — the temp ref is never
+  //    checked out in any worktree so git never blocks the fetch.
+  // 2. Capture the exact remote SHA so we can update the (potentially stale) local branch ref.
+  const tempRef = `refs/baguette-fetch/${worktreeId}`;
+  await gitWithToken(token, ['fetch', 'origin', `+${branch}:${tempRef}`], {
     cwd: barePath,
     stdio: 'pipe',
   });
+  // Sync the local branch ref to the fetched commit so new worktrees start from the latest
+  // remote commit rather than the stale commit from when the bare clone was created.
+  try {
+    const { stdout } = await execFileAsync('git', ['rev-parse', tempRef], { cwd: barePath, stdio: 'pipe' });
+    await execFileAsync('git', ['update-ref', `refs/heads/${branch}`, stdout.trim()], { cwd: barePath, stdio: 'pipe' });
+  } catch { /* fall back to existing local ref */ }
+  // Clean up temp ref (best-effort)
+  try { await execFileAsync('git', ['update-ref', '-d', tempRef], { cwd: barePath, stdio: 'pipe' }); } catch { /* ignore */ }
 
   // Also fetch the base branch so origin/<baseBranch> is up to date for merge-base diffs
   if (baseBranch && baseBranch !== branch) {

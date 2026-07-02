@@ -1,11 +1,17 @@
 /**
  * Integration test for createWorktree using real local git repos.
  *
- * Regression test for: "refusing to fetch into branch '<name>' checked out at '<path>'"
- * When two sessions share the same base branch, the second createWorktree call used to
- * fail at the fetch step because `+branch:branch` tried to update refs/heads/<branch>
- * while another worktree had it checked out. The fix fetches to refs/remotes/origin/<branch>
- * instead, which is never "checked out" and so never blocked by git.
+ * Covers two behaviours:
+ *
+ * 1. "Refusing to fetch into branch checked out" regression:
+ *    When two sessions share the same base branch, the second createWorktree call used to fail
+ *    at the fetch step because `+branch:branch` tried to update refs/heads/<branch> while
+ *    another worktree had it checked out. The fix fetches to a session-unique temp ref instead.
+ *
+ * 2. Worktrees start from the latest remote commit:
+ *    The bare clone's local branch ref can be stale (it was set at clone time and never updated
+ *    by subsequent remote pushes). The fix syncs refs/heads/<branch> via git update-ref after
+ *    every fetch so new worktrees always start at the current remote HEAD.
  */
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { execFile } from 'child_process';
@@ -78,11 +84,35 @@ describe('createWorktree', () => {
     await createWorktree(repo, BRANCH, 'session-1', FAKE_TOKEN, { detach: false });
 
     // Session 2: new session based on the same branch (default detach: true).
-    // Before the fix: `git fetch origin +BRANCH:BRANCH` failed with
-    //   "refusing to fetch into branch 'refs/heads/BRANCH' checked out at <session-1-path>"
-    // After the fix: fetches to refs/remotes/origin/BRANCH — no ref ownership conflict.
+    // The fetch goes to a unique temp ref, so git never sees a "branch checked out" conflict.
     await expect(
       createWorktree(repo, BRANCH, 'session-2', FAKE_TOKEN)
     ).resolves.toMatchObject({ worktreePath: expect.stringContaining('session-2') });
+  });
+
+  it('worktree starts from the latest remote commit, not the stale bare-clone ref', async () => {
+    const workPath = path.join(TEST_REPOS_DIR, 'work');
+    const remotePath = path.join(TEST_REPOS_DIR, 'remote.git');
+
+    // Push a new commit to the remote AFTER the bare clone was created
+    await fs.promises.writeFile(path.join(workPath, 'update.txt'), 'updated\n');
+    await git(workPath, 'add', '.');
+    await git(workPath, 'commit', '-m', 'post-clone update');
+    await git(workPath, 'push', 'origin', BRANCH);
+
+    // Capture the new HEAD SHA from the remote
+    const { stdout: remoteHead } = await git(remotePath, 'rev-parse', BRANCH);
+    const expectedSha = remoteHead.trim();
+
+    const repo = { bare_path: barePath, stripped_name: 'test-org/test-repo' };
+    const { worktreePath } = await createWorktree(repo, BRANCH, 'session-latest', FAKE_TOKEN);
+
+    // The local branch ref in the bare repo should be updated to the latest remote commit
+    const { stdout: bareHead } = await git(barePath, 'rev-parse', BRANCH);
+    expect(bareHead.trim()).toBe(expectedSha);
+
+    // The worktree directory should contain files from the new commit
+    const files = await fs.promises.readdir(worktreePath);
+    expect(files).toContain('update.txt');
   });
 });
