@@ -3,7 +3,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 import { DOCKER_COMPOSE_PATH } from '../config.js';
 import { getEffectiveGithubToken } from '../services/agent-settings.js';
 import { listModels } from '../services/anthropic-models.js';
