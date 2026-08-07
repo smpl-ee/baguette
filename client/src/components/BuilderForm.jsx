@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Github } from 'lucide-react';
+import GithubIcon from './GithubIcon.jsx';
 import { apiFetch } from '../api.js';
 import { usersService, pluginsService } from '../feathers.js';
 import { useAuth } from '../hooks/useAuth.jsx';
@@ -178,7 +178,7 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
           </div>
         </div>
         <p className="flex min-w-0 items-center gap-1.5 text-xs text-zinc-500">
-          <Github className="h-3.5 w-3.5 shrink-0 opacity-80" aria-hidden />
+          <GithubIcon className="h-3.5 w-3.5 shrink-0 opacity-80" />
           {repoFullName ? (
             <span className="min-w-0 truncate">
               <span className="text-zinc-500">{repoOwner}</span>
