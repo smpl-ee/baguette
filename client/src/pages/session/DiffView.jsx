@@ -289,16 +289,17 @@ export default function DiffView({ session, onFilesChange }) {
   const canMerge =
     !!session?.pr_number && (prStatus === 'open' || prStatus === 'draft' || prStatus === null);
 
+  const sessionId = session?.id;
   const fetchDiff = useCallback(() => {
-    if (!session?.id) return;
+    if (!sessionId) return;
     setLoading(true);
     setError(null);
     sessionsService
-      .diff(session.id)
+      .diff(sessionId)
       .then((res) => setDiff(res.diff || ''))
       .catch((err) => setError(err.message || 'Failed to load diff'))
       .finally(() => setLoading(false));
-  }, [session?.id]);
+  }, [sessionId]);
 
   useEffect(() => {
     fetchDiff();

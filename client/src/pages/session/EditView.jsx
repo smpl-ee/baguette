@@ -11,12 +11,14 @@ export default function EditView({ session }) {
   const [fetching, setFetching] = useState(false);
   const [dirty, setDirty] = useState(false);
 
+  const sessionId = session?.id;
   useEffect(() => {
     if (!session) return;
     setLabel(session.label ?? '');
     setDescription(session.pr_description ?? '');
     setDirty(false);
-  }, [session?.id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId]);
 
   const handleSave = async () => {
     if (!session?.id || saving) return;
