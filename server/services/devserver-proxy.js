@@ -1,5 +1,5 @@
 import http from 'http';
-import cookie from 'cookie';
+import { parseCookie } from 'cookie';
 import { unsign } from 'cookie-signature';
 import logger from '../logger.js';
 import { extractSessionIdFromHost, verifyPreviewToken } from './preview.js';
@@ -165,7 +165,7 @@ export class DevserverProxy {
    * Uses http.request so the 101 handshake is forwarded correctly (no duplicate Host lines).
    */
   async handlePreviewUpgrade(req, socket, head, session) {
-    const cookies = cookie.parse(req.headers.cookie || '');
+    const cookies = parseCookie(req.headers.cookie || '');
     const signed = cookies['baguette_preview'] || '';
     const shortId = signed.startsWith('s:') ? unsign(signed.slice(2), ENCRYPTION_KEY) : false;
 
