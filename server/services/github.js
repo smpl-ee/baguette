@@ -24,6 +24,9 @@ function sanitizeGitError(token, err) {
 }
 
 async function gitWithToken(token, args, opts) {
+  if (!token) {
+    return execFileAsync('git', args, opts);
+  }
   try {
     return await execFileAsync('git', [...gitAuthArgs(token), ...args], opts);
   } catch (err) {
@@ -191,7 +194,7 @@ export async function ensureBareClone(repo, token) {
   } catch {
     /* path may not exist */
   }
-  await gitWithToken(token, ['clone', '--bare', repoUrl(repo.full_name), barePath], {
+  await gitWithToken(token, ['clone', repoUrl(repo.full_name), barePath], {
     stdio: 'pipe',
   });
   if (await lfsAvailable()) {
@@ -200,6 +203,44 @@ export async function ensureBareClone(repo, token) {
     } catch { /* repo may not use LFS */ }
   }
   return barePath;
+}
+
+/**
+ * Initialize a brand-new local git repo with an empty initial commit.
+ * Returns the repo path (same convention as bare_path).
+ */
+export async function initLocalRepo(strippedName) {
+  const repoPath = barePathForStripped(strippedName);
+  await fs.promises.mkdir(repoPath, { recursive: true });
+  await execFileAsync('git', ['init', repoPath], { stdio: 'pipe' });
+  await execFileAsync('git', ['-C', repoPath, 'commit', '--allow-empty', '-m', 'Initial commit'], {
+    stdio: 'pipe',
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: 'Baguette',
+      GIT_AUTHOR_EMAIL: 'baguette@localhost',
+      GIT_COMMITTER_NAME: 'Baguette',
+      GIT_COMMITTER_EMAIL: 'baguette@localhost',
+    },
+  });
+  return repoPath;
+}
+
+/**
+ * Clone an existing local git repo (non-bare) into REPOS_DIR for use as a session source.
+ * Returns the repo path.
+ */
+export async function ensureLocalClone(localPath, strippedName) {
+  const repoPath = barePathForStripped(strippedName);
+  try {
+    await fs.promises.access(repoPath);
+    return repoPath;
+  } catch {
+    /* not cloned yet */
+  }
+  await fs.promises.mkdir(path.dirname(repoPath), { recursive: true });
+  await execFileAsync('git', ['clone', localPath, repoPath], { stdio: 'pipe' });
+  return repoPath;
 }
 
 /** @param {{ baseBranch?: string, detach?: boolean }} [opts] — `detach` defaults to true (false checks out `branch` in the new worktree). */
@@ -214,10 +255,17 @@ export async function createWorktree(repo, branch, worktreeId, token, opts = {})
   //    checked out in any worktree so git never blocks the fetch.
   // 2. Capture the exact remote SHA so we can update the (potentially stale) local branch ref.
   const tempRef = `refs/baguette-fetch/${worktreeId}`;
-  await gitWithToken(token, ['fetch', 'origin', `+${branch}:${tempRef}`], {
-    cwd: barePath,
-    stdio: 'pipe',
-  });
+  try {
+    await gitWithToken(token, ['fetch', 'origin', `+${branch}:${tempRef}`], {
+      cwd: barePath,
+      stdio: 'pipe',
+    });
+  } catch (err) {
+    const msg = err?.stderr?.toString() ?? err?.message ?? '';
+    const isNoRemote = msg.includes("No such remote") || msg.includes("does not appear to be a git repository");
+    if (!isNoRemote) throw err;
+    // Local repo with no origin — use existing local branch ref as-is
+  }
   // Sync the local branch ref to the fetched commit so new worktrees start from the latest
   // remote commit rather than the stale commit from when the bare clone was created.
   try {
@@ -229,11 +277,13 @@ export async function createWorktree(repo, branch, worktreeId, token, opts = {})
 
   // Also fetch the base branch so origin/<baseBranch> is up to date for merge-base diffs
   if (baseBranch && baseBranch !== branch) {
-    await gitWithToken(
-      token,
-      ['fetch', 'origin', `+${baseBranch}:refs/remotes/origin/${baseBranch}`],
-      { cwd: barePath, stdio: 'pipe' }
-    );
+    try {
+      await gitWithToken(
+        token,
+        ['fetch', 'origin', `+${baseBranch}:refs/remotes/origin/${baseBranch}`],
+        { cwd: barePath, stdio: 'pipe' }
+      );
+    } catch { /* local repo with no remote — skip */ }
   }
 
   if (await lfsAvailable()) {

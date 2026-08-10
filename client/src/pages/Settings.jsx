@@ -7,6 +7,7 @@ import { useAuth } from '../hooks/useAuth.jsx';
 import { requestNotificationPermission } from '../utils/notifications.js';
 import { useRepoContext } from '../context/RepoContext.jsx';
 import SearchableSelect from '../components/SearchableSelect.jsx';
+import { repoDisplayName, isLocalRepo } from '../utils/repoDisplayName.js';
 
 // ─── RepoSearchInput ──────────────────────────────────────────────────────────
 
@@ -162,12 +163,19 @@ function RepositoriesTab({ settings, onSave }) {
     }
   };
 
-  // Repo state
+  // GitHub repo state
   const [selectedRepo, setSelectedRepo] = useState('');
   const [adding, setAdding] = useState(false);
   const [addResult, setAddResult] = useState(null);
   const [unlinkingId, setUnlinkingId] = useState(null);
   const [confirmUnlink, setConfirmUnlink] = useState(null);
+
+  // New local repo state
+  const [localName, setLocalName] = useState('');
+  const [addingLocal, setAddingLocal] = useState(false);
+  // Import local repo state
+  const [importPath, setImportPath] = useState('');
+  const [addingImport, setAddingImport] = useState(false);
 
   // Per-repo Anthropic key state
   const [repoKeyEditingId, setRepoKeyEditingId] = useState(null);
@@ -208,6 +216,38 @@ function RepositoriesTab({ settings, onSave }) {
       toastError('Failed to add repository', err);
     } finally {
       setAdding(false);
+    }
+  };
+
+  const handleAddLocal = async (e) => {
+    e.preventDefault();
+    if (!localName.trim()) return;
+    setAddingLocal(true);
+    try {
+      const result = await reposService.createLocal({ name: localName.trim() });
+      setLocalName('');
+      setAddResult(result);
+      await refetchRepos();
+    } catch (err) {
+      toastError('Failed to create repository', err);
+    } finally {
+      setAddingLocal(false);
+    }
+  };
+
+  const handleImportLocal = async (e) => {
+    e.preventDefault();
+    if (!importPath.trim()) return;
+    setAddingImport(true);
+    try {
+      const result = await reposService.createLocal({ localPath: importPath.trim() });
+      setImportPath('');
+      setAddResult(result);
+      await refetchRepos();
+    } catch (err) {
+      toastError('Failed to import repository', err);
+    } finally {
+      setAddingImport(false);
     }
   };
 
@@ -337,6 +377,58 @@ function RepositoriesTab({ settings, onSave }) {
           />
         </form>
 
+        <form
+          onSubmit={handleAddLocal}
+          className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 sm:p-5 mb-4"
+        >
+          <p className="text-zinc-400 text-sm mb-3">
+            Create a new local repository — no GitHub required.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <input
+              type="text"
+              value={localName}
+              onChange={(e) => setLocalName(e.target.value)}
+              placeholder="Repository name (e.g. my-project)"
+              required
+              className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+            />
+            <button
+              type="submit"
+              disabled={addingLocal || !localName.trim()}
+              className="inline-flex items-center justify-center bg-amber-500 hover:bg-amber-400 disabled:bg-zinc-700 text-zinc-950 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors shrink-0"
+            >
+              {addingLocal ? 'Creating…' : 'Create'}
+            </button>
+          </div>
+        </form>
+
+        <form
+          onSubmit={handleImportLocal}
+          className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 sm:p-5 mb-4"
+        >
+          <p className="text-zinc-400 text-sm mb-3">
+            Import an existing local git repository from disk.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <input
+              type="text"
+              value={importPath}
+              onChange={(e) => setImportPath(e.target.value)}
+              placeholder="Absolute path (e.g. /home/user/projects/my-app)"
+              required
+              className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white font-mono placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+            />
+            <button
+              type="submit"
+              disabled={addingImport || !importPath.trim()}
+              className="inline-flex items-center justify-center bg-amber-500 hover:bg-amber-400 disabled:bg-zinc-700 text-zinc-950 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors shrink-0"
+            >
+              {addingImport ? 'Importing…' : 'Import'}
+            </button>
+          </div>
+        </form>
+
         {addResult && !addResult.hasBaguetteConfig && (
           <div className="bg-amber-900/20 border border-amber-700 rounded-xl px-4 py-3 mb-4">
             <p className="text-sm text-amber-200">
@@ -365,7 +457,15 @@ function RepositoriesTab({ settings, onSave }) {
               <div key={r.id} className="border-b border-zinc-800 last:border-0">
                 <div className="flex items-center justify-between px-4 py-3 gap-3">
                   <div className="min-w-0">
-                    <code className="text-sm text-white font-medium">{r.full_name}</code>
+                    <div className="flex items-center gap-2">
+                      <code className="text-sm text-white font-medium">{repoDisplayName(r.full_name)}</code>
+                      {isLocalRepo(r.full_name) && (
+                        <span className="text-xs bg-zinc-700 text-zinc-300 px-1.5 py-0.5 rounded font-mono">local</span>
+                      )}
+                    </div>
+                    {r.full_name.startsWith('/') && (
+                      <div className="text-xs text-zinc-600 mt-0.5 font-mono truncate">{r.full_name}</div>
+                    )}
                     <div className="text-xs text-zinc-500 mt-0.5">
                       {r.session_count} session(s) · {r.exists_on_fs ? 'On disk' : 'Not on disk'}
                     </div>
@@ -459,7 +559,7 @@ function RepositoriesTab({ settings, onSave }) {
             </p>
             <div className="bg-amber-900/30 border border-amber-700 rounded-lg px-3 py-2 text-sm text-amber-200 mb-4">
               If you are the last user with this repository, all its sessions, worktrees, and the
-              bare clone will also be deleted.
+              local clone will also be deleted.
             </div>
             <div className="flex justify-end gap-2">
               <button

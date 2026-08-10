@@ -116,7 +116,7 @@ function makeApp(sessionData, { tasksCreate } = {}) {
     if (table === 'repos')
       return {
         where: () => ({
-          first: async () => ({ id: sessionSnapshot.repo_id ?? 7, default_branch: 'main' }),
+          first: async () => ({ id: sessionSnapshot.repo_id ?? 7, full_name: sessionSnapshot.repo_full_name ?? 'owner/repo', default_branch: 'main' }),
         }),
       };
     return { where: () => ({ first: async () => null }) };

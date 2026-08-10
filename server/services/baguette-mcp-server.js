@@ -90,6 +90,21 @@ export function buildBaguetteMcpServer(session, app) {
     return getEffectiveGithubToken(user);
   };
 
+  const getRepo = async () => {
+    const s = await getSession();
+    if (!s.repo_id) return null;
+    return db('repos').where({ id: s.repo_id }).first();
+  };
+
+  const requireGitHubRepo = async () => {
+    const repo = await getRepo();
+    const fn = repo?.full_name;
+    if (fn && (fn.startsWith('/') || !fn.includes('/'))) {
+      return fail('This repository is not connected to GitHub. Push and PR features are unavailable.');
+    }
+    return null;
+  };
+
   const patchSession = async (data) => {
     const updated = await app
       .service('sessions')
@@ -121,6 +136,8 @@ export function buildBaguetteMcpServer(session, app) {
       ),
 
       tool('GitPush', 'Push the current branch to origin and set upstream.', {}, async () => {
+        const localErr = await requireGitHubRepo();
+        if (localErr) return localErr;
         if (!session.auto_push) {
           return ok({
             message:
@@ -212,6 +229,8 @@ export function buildBaguetteMcpServer(session, app) {
           description: z.string().optional().describe('PR body / description (markdown)'),
         },
         async ({ title, description = '' }) => {
+          const localErr = await requireGitHubRepo();
+          if (localErr) return localErr;
           // Always persist label and description to session regardless of auto_push
           await patchSession({ label: title, pr_description: description });
           if (!session.auto_push) {
@@ -421,6 +440,8 @@ export function buildBaguetteMcpServer(session, app) {
       // ── CI ─────────────────────────────────────────────────────────────────
 
       tool('PrWorkflows', 'Get CI workflow run status for the PR branch.', {}, async () => {
+        const localErr = await requireGitHubRepo();
+        if (localErr) return localErr;
         const session = await getSession();
         const branch = session?.remote_branch || session?.created_branch;
         if (!branch) return ok({ runs: [], message: 'No branch available for this session.' });
@@ -437,6 +458,8 @@ export function buildBaguetteMcpServer(session, app) {
           endByte: z.number().optional().describe('End byte offset for partial log fetch'),
         },
         async ({ runId, startByte, endByte }) => {
+          const localErr = await requireGitHubRepo();
+          if (localErr) return localErr;
           const session = await getSession();
           const result = await getPRWorkflowLogs(await getToken(), session.repo_full_name, runId, {
             startByte,

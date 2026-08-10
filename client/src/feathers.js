@@ -22,7 +22,8 @@ reposService.methods(
   'configure',
   'refresh',
   'findAll',
-  'unlink'
+  'unlink',
+  'createLocal'
 );
 export const secretsService = app.service('secrets');
 export const usersService = app.service('users');

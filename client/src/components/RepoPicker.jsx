@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { ChevronDown, Plus } from 'lucide-react';
 import GithubIcon from './GithubIcon.jsx';
 import { useRepoContext } from '../context/RepoContext.jsx';
+import { repoDisplayName, isLocalRepo } from '../utils/repoDisplayName.js';
 
 export default function RepoPicker({ className = '' }) {
   const { repos, selectedRepo, setSelectedRepo } = useRepoContext();
@@ -18,7 +19,7 @@ export default function RepoPicker({ className = '' }) {
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
 
-  const label = selectedRepo ? selectedRepo.split('/')[1] : 'Select repo';
+  const label = selectedRepo ? repoDisplayName(selectedRepo) : 'Select repo';
 
   return (
     <div className={`relative ${className}`} ref={ref}>
@@ -45,7 +46,10 @@ export default function RepoPicker({ className = '' }) {
                   : 'text-zinc-400 hover:text-white hover:bg-zinc-800/50'
               }`}
             >
-              {r.full_name.split('/')[1] ?? r.full_name}
+              {repoDisplayName(r.full_name)}
+              {isLocalRepo(r.full_name) && (
+                <span className="ml-1.5 text-xs text-zinc-500">local</span>
+              )}
             </button>
           ))}
           <div className={repos.length > 0 ? 'border-t border-zinc-700 mt-1 pt-1' : ''}>

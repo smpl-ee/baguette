@@ -450,6 +450,9 @@ async function prepareSessionEnvironment(context) {
   const repo = await db('repos').where({ full_name: repoFullName }).first();
 
   if (agentType === 'reviewer') {
+    if (repoFullName.startsWith('/') || !repoFullName.includes('/')) {
+      throw new BadRequest('PR review is not available for local repositories.');
+    }
     const pr = await getOpenPRByNumber(token, repoFullName, prNumber);
     const { worktreePath: absoluteWorktreePath } = await createWorktree(
       repo,

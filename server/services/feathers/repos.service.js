@@ -15,6 +15,8 @@ import {
   clearBranchesCache,
   listBranches,
   ensureBareClone,
+  initLocalRepo,
+  ensureLocalClone,
   toStrippedName,
 } from '../github.js';
 import { loadBaguetteConfig } from '../baguette-config.js';
@@ -22,6 +24,9 @@ import loadPrompt from '../../prompts/loadPrompt.js';
 import { requireUser, decryptFields } from './hooks.js';
 import { getEffectiveGithubToken } from '../agent-settings.js';
 import { REPOS_DIR, DOCKER_COMPOSE_PATH } from '../../config.js';
+
+/** True for local repos: absolute path (imported) or plain name with no "/" (brand-new). */
+const isLocalRepo = (fullName) => fullName.startsWith('/') || !fullName.includes('/');
 
 class ReposService extends KnexService {
   setup(app) {
@@ -298,10 +303,124 @@ class ReposService extends KnexService {
     return { ok: true };
   }
 
-  /** Fetch branches for a repo from GitHub API. */
+  /** Fetch branches for a repo. Uses GitHub API for GitHub repos; reads local git refs for local repos. */
   async branches(data, params) {
-    const branches = await listBranches(getEffectiveGithubToken(params.user), data);
+    const fullName = data;
+    if (isLocalRepo(fullName)) {
+      const db = this.options.Model;
+      const repo = await db('repos').where({ full_name: fullName }).whereNull('deleted_at').first();
+      if (repo?.bare_path) {
+        const { stdout } = await execFileAsync('git', ['branch', '--list', '--format=%(refname:short)'], {
+          cwd: repo.bare_path,
+          stdio: 'pipe',
+        });
+        return { branches: stdout.split('\n').filter(Boolean) };
+      }
+      return { branches: [] };
+    }
+    const branches = await listBranches(getEffectiveGithubToken(params.user), fullName);
     return { branches };
+  }
+
+  /**
+   * Create a brand-new local repo (by name) or import an existing local git directory (by path).
+   * No GitHub required.
+   *
+   * - { name }      → git init a fresh repo; full_name = name (no "/" allowed)
+   * - { localPath } → git clone from that directory; full_name = absolute localPath
+   */
+  async createLocal(data, params) {
+    const { name, localPath } = data;
+    if (!name && !localPath) throw new Error('Provide either name (new repo) or localPath (import)');
+
+    const fullName = localPath ?? name;
+    if (!localPath && name.includes('/')) throw new Error('Repo name must not contain "/"');
+
+    const db = this.options.Model;
+    let repo = await db('repos').where({ full_name: fullName }).first();
+
+    let strippedName = repo?.stripped_name;
+    if (!strippedName) {
+      // For imported repos derive from the basename; for new repos use the name itself
+      const base = toStrippedName(localPath ? path.basename(localPath) : name);
+      const taken = await db('repos').where({ stripped_name: base }).first();
+      if (taken) {
+        let n = 0;
+        while (
+          await db('repos')
+            .where({ stripped_name: `${base}-${n}` })
+            .first()
+        )
+          n++;
+        strippedName = `${base}-${n}`;
+      } else {
+        strippedName = base;
+      }
+    }
+
+    const repoPath = localPath
+      ? await ensureLocalClone(localPath, strippedName)
+      : await initLocalRepo(strippedName);
+
+    let defaultBranch;
+    try {
+      const { stdout } = await execFileAsync('git', ['symbolic-ref', '--short', 'HEAD'], {
+        cwd: repoPath,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      defaultBranch = stdout.trim() || 'main';
+    } catch {
+      defaultBranch = 'main';
+    }
+
+    const now = new Date().toISOString();
+    if (repo) {
+      const updates = {
+        bare_path: repoPath,
+        stripped_name: strippedName,
+        default_branch: defaultBranch,
+        last_fetched_at: now,
+      };
+      if (repo.deleted_at) updates.deleted_at = null;
+      await db('repos').where({ id: repo.id }).update(updates);
+      repo = { ...repo, ...updates };
+    } else {
+      [repo] = await db('repos')
+        .insert({
+          full_name: fullName,
+          stripped_name: strippedName,
+          bare_path: repoPath,
+          default_branch: defaultBranch,
+          last_fetched_at: now,
+        })
+        .returning('*');
+    }
+
+    let hasBaguetteConfig = false;
+    const tmpId = `_check_${Date.now()}`;
+    const tmpWorktree = path.join(REPOS_DIR, repo.stripped_name, 'sessions', tmpId);
+    try {
+      await fs.promises.mkdir(path.dirname(tmpWorktree), { recursive: true });
+      await execFileAsync('git', ['worktree', 'add', '--detach', tmpWorktree, defaultBranch], {
+        cwd: repo.bare_path,
+        stdio: 'pipe',
+      });
+      const config = await loadBaguetteConfig(tmpWorktree);
+      if (config) hasBaguetteConfig = true;
+      await execFileAsync('git', ['worktree', 'remove', '--force', tmpWorktree], {
+        cwd: repo.bare_path,
+        stdio: 'pipe',
+      });
+    } catch {
+      await fs.promises.rm(tmpWorktree, { recursive: true, force: true }).catch(() => {});
+    }
+
+    await db('user_repos')
+      .insert({ user_id: params.user.id, repo_id: repo.id })
+      .onConflict(['user_id', 'repo_id'])
+      .ignore();
+
+    return { repo, hasBaguetteConfig };
   }
 
   /** Generate an onboarding prompt for a registered repo. */
@@ -345,6 +464,7 @@ export function registerReposService(app, path = 'repos') {
       'refresh',
       'findAll',
       'unlink',
+      'createLocal',
     ],
   });
   app.service(path).hooks(reposHooks);
