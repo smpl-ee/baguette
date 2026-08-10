@@ -1,7 +1,7 @@
 import { feathers } from '@feathersjs/feathers';
 import express from '@feathersjs/express';
 import socketio from '@feathersjs/socketio';
-import cookie from 'cookie';
+import * as cookie from 'cookie';
 import { unsign } from 'cookie-signature';
 import { ENCRYPTION_KEY } from './config.js';
 
@@ -36,7 +36,7 @@ export function cookieAuthSocketMiddleware(app) {
     const rawCookie = socket.handshake?.headers?.cookie;
     socket.feathers = socket.feathers || {};
     if (!rawCookie) return next();
-    const cookies = cookie.parse(rawCookie);
+    const cookies = cookie.parseCookie(rawCookie);
     const signed = cookies['userId'];
     if (!signed) return next();
     const prefix = 's:';

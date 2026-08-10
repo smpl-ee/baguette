@@ -1,1 +1,1 @@
-allowBuilds: {}
+allowBuilds: { better-sqlite3: set this to true or false }
