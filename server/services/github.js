@@ -527,7 +527,17 @@ export async function gitDiff(
   { maxBuffer = MAX_DIFF_BUFFER_SIZE, filePath } = {}
 ) {
   try {
-    const ref = `origin/${baseBranch}`;
+    // Prefer origin/<baseBranch> for accurate merge-base; fall back to local branch ref
+    // for local repos that have no remote or where origin hasn't been fetched.
+    let ref = `origin/${baseBranch}`;
+    try {
+      await execFileAsync('git', ['-C', worktreePath, 'rev-parse', '--verify', ref], {
+        maxBuffer: 256,
+        stdio: 'pipe',
+      });
+    } catch {
+      ref = baseBranch;
+    }
     const { stdout: mergeBase } = await execFileAsync(
       'git',
       ['-C', worktreePath, 'merge-base', 'HEAD', ref],

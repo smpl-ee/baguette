@@ -192,8 +192,8 @@ export class SessionsService extends KnexService {
       const token = getEffectiveGithubToken(user);
       const currentBranch = session.remote_branch || session.created_branch;
       await Promise.all([
-        token && session.base_branch ? gitFetch(cwd, token, session.base_branch).catch(() => {}) : null,
-        token && currentBranch && currentBranch !== session.base_branch
+        session.base_branch ? gitFetch(cwd, token, session.base_branch).catch(() => {}) : null,
+        currentBranch && currentBranch !== session.base_branch
           ? gitFetch(cwd, token, currentBranch).catch(() => {})
           : null,
       ]);

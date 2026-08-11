@@ -675,11 +675,18 @@ export function buildBaguetteMcpServer(session, app) {
             ),
         },
         async ({ args = [] }) => {
-          const ref = baseBranch ? `origin/${baseBranch}` : null;
-          const mergeBase = ref
-            ? await execFileAsync('git', ['merge-base', 'HEAD', ref], { cwd: absoluteWorktreePath })
+          const mergeBase = baseBranch
+            ? await execFileAsync('git', ['merge-base', 'HEAD', `origin/${baseBranch}`], {
+                cwd: absoluteWorktreePath,
+              })
                 .then((r) => r.stdout.trim())
-                .catch(() => null)
+                .catch(() =>
+                  execFileAsync('git', ['merge-base', 'HEAD', baseBranch], {
+                    cwd: absoluteWorktreePath,
+                  })
+                    .then((r) => r.stdout.trim())
+                    .catch(() => null)
+                )
             : null;
           const base = mergeBase || 'HEAD~1';
           const rawDiff = await execFileAsync('git', ['diff', base, 'HEAD', ...args], {
