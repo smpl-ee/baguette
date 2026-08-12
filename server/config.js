@@ -53,6 +53,7 @@ export const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
+const TEST_DATA_DIR = path.join(os.tmpdir(), `baguette-test-${Math.random().toString(36).slice(2)}`);
 
 export const DATA_DIR = getDataDir();
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -82,9 +83,15 @@ if (!fs.existsSync(DOCKER_COMPOSE_PATH)) {
  * Data directory for SQLite DB, repo clones, and worktrees.
  * Set DATA_DIR to override; default is <homedir>/.baguette.
  * Relative paths (e.g. ./.data or .data) are resolved from the project root.
+ * In test mode without an explicit DATA_DIR, falls back to a unique temp directory
+ * per process so tests never touch the developer's real data.
  */
 function getDataDir() {
-  const raw = process.env.DATA_DIR ?? path.join(os.homedir(), '.baguette');
+  const raw =
+    process.env.DATA_DIR ??
+    (process.env.NODE_ENV === 'test'
+      ? TEST_DATA_DIR
+      : path.join(os.homedir(), '.baguette'));
   const resolved = path.isAbsolute(raw) ? path.resolve(raw) : path.resolve(rootDir, raw);
   logger.info({ path: resolved }, 'Using data directory');
   return resolved;
