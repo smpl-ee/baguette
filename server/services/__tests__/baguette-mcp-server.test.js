@@ -70,6 +70,7 @@ import { buildBaguetteMcpServer } from '../baguette-mcp-server.js';
 
 const DEFAULT_SESSION = {
   id: 1,
+  short_id: 'test',
   user_id: 1,
   repo_id: 7,
   pr_url: null,
@@ -81,6 +82,7 @@ const DEFAULT_SESSION = {
   worktree_path: '/tmp/wt',
   auto_push: 1,
 };
+const SESSION_HEADER = '*Posted by Claude/Baguette for session test*\n\n';
 const INTERNAL_PATCH_PARAMS = { provider: undefined, user: { id: 1 } };
 
 /** Simulates a task that calls onLog/onExit callbacks asynchronously. */
@@ -565,7 +567,7 @@ describe('PrComment', () => {
     const { tools } = buildServer({ pr_number: 42 });
     const result = parseResult(await callTool(tools, 'PrComment', { body: 'Looks good!' }));
     expect(result.ok).toBe(true);
-    expect(createPRComment).toHaveBeenCalledWith('ghtoken', 'owner/repo', 42, 'Looks good!');
+    expect(createPRComment).toHaveBeenCalledWith('ghtoken', 'owner/repo', 42, `${SESSION_HEADER}Looks good!`);
     expect(createPRLineComment).not.toHaveBeenCalled();
   });
 
@@ -580,7 +582,7 @@ describe('PrComment', () => {
     );
     expect(result.ok).toBe(true);
     expect(createPRLineComment).toHaveBeenCalledWith('ghtoken', 'owner/repo', 42, {
-      body: 'Issue here',
+      body: `${SESSION_HEADER}Issue here`,
       path: 'src/foo.js',
       line: 10,
       commitId: 'abc1234',
@@ -630,7 +632,7 @@ describe('PrReview', () => {
       'owner/repo',
       42,
       'APPROVE',
-      'LGTM',
+      `${SESSION_HEADER}LGTM`,
       [],
       null
     );
@@ -645,7 +647,7 @@ describe('PrReview', () => {
       'owner/repo',
       42,
       'REQUEST_CHANGES',
-      'Fix this',
+      `${SESSION_HEADER}Fix this`,
       [],
       null
     );
@@ -667,8 +669,8 @@ describe('PrReview', () => {
       'owner/repo',
       42,
       'COMMENT',
-      'Has issues',
-      comments,
+      `${SESSION_HEADER}Has issues`,
+      [{ ...comments[0], body: `${SESSION_HEADER}Fix this` }],
       'abc1234'
     );
   });

@@ -90,6 +90,11 @@ export function buildBaguetteMcpServer(session, app) {
     return getEffectiveGithubToken(user);
   };
 
+  const withSessionHeader = (body, session) => {
+    const sessionId = session?.short_id || session?.id;
+    return `*Posted by Claude/Baguette for session ${sessionId}*\n\n${body}`;
+  };
+
   const getRepo = async () => {
     const s = await getSession();
     if (!s.repo_id) return null;
@@ -354,6 +359,7 @@ export function buildBaguetteMcpServer(session, app) {
           const session = await getSession();
           if (!session?.pr_number) return fail('No pull request associated with this session.');
           const token = await getToken();
+          const bodyWithHeader = withSessionHeader(body, session);
           if (filePath && line) {
             const { stdout: commitId } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
               cwd: absoluteWorktreePath,
@@ -363,7 +369,7 @@ export function buildBaguetteMcpServer(session, app) {
               session.repo_full_name,
               session.pr_number,
               {
-                body,
+                body: bodyWithHeader,
                 path: filePath,
                 line,
                 commitId: commitId.trim(),
@@ -376,7 +382,7 @@ export function buildBaguetteMcpServer(session, app) {
             token,
             session.repo_full_name,
             session.pr_number,
-            body
+            bodyWithHeader
           );
           return ok(comment);
         }
@@ -429,8 +435,8 @@ export function buildBaguetteMcpServer(session, app) {
             session.repo_full_name,
             session.pr_number,
             eventMap[event],
-            body,
-            comments,
+            withSessionHeader(body, session),
+            comments.map((c) => ({ ...c, body: withSessionHeader(c.body, session) })),
             commitId
           );
           return ok(review);
