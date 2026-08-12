@@ -575,6 +575,38 @@ export async function getPRStatus(token, repoFullName, prNumber) {
 }
 
 /**
+ * Converts a draft PR to ready for review via the GitHub GraphQL API.
+ */
+export async function markPRReady(token, repoFullName, prNumber) {
+  // First fetch the PR node ID required by GraphQL
+  const prRes = await fetch(`https://api.github.com/repos/${repoFullName}/pulls/${prNumber}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.github.v3+json',
+      'User-Agent': 'baguette-app',
+    },
+  });
+  if (!prRes.ok) throw new Error('Failed to fetch PR node ID');
+  const { node_id } = await prRes.json();
+
+  const gqlRes = await fetch('https://api.github.com/graphql', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'User-Agent': 'baguette-app',
+    },
+    body: JSON.stringify({
+      query: `mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { pullRequest { isDraft } } }`,
+      variables: { id: node_id },
+    }),
+  });
+  if (!gqlRes.ok) throw new Error('Failed to mark PR as ready for review');
+  const gqlData = await gqlRes.json();
+  if (gqlData.errors?.length) throw new Error(gqlData.errors[0].message);
+}
+
+/**
  * Squash-merges a pull request via the GitHub API.
  */
 export async function mergePR(token, repoFullName, prNumber) {

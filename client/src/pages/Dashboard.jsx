@@ -27,6 +27,7 @@ const REPO_COLORS = [
 function UsageGraph({ repoFilter }) {
   const [byDay, setByDay] = useState(null);
   const [byRepo, setByRepo] = useState(null);
+  const [hoveredDay, setHoveredDay] = useState(null);
 
   useEffect(() => {
     apiFetch('/api/usage/by-day')
@@ -67,19 +68,27 @@ function UsageGraph({ repoFilter }) {
             </span>
             <span className="text-xs text-zinc-500">${total.toFixed(2)} total</span>
           </div>
-          <div className="flex items-end gap-px h-10">
+          <div className="flex items-end gap-px h-10" onMouseLeave={() => setHoveredDay(null)}>
             {days.map((day) => {
               const cost = dayMap[day] ?? 0;
               const pct = maxDay > 0 ? (cost / maxDay) * 100 : 0;
               return (
                 <div
                   key={day}
-                  className="flex-1 bg-amber-500/70 rounded-sm min-h-px transition-all hover:bg-amber-400"
+                  className="flex-1 bg-amber-500/70 rounded-sm min-h-px transition-all hover:bg-amber-400 cursor-default"
                   style={{ height: `${Math.max(pct, cost > 0 ? 4 : 0)}%` }}
-                  title={`${day}: $${cost.toFixed(4)}`}
+                  onMouseEnter={() => setHoveredDay({ day, cost })}
                 />
               );
             })}
+          </div>
+          <div className="h-4 mt-1">
+            {hoveredDay && (
+              <span className="text-xs text-zinc-400">
+                {hoveredDay.day}
+                <span className="text-zinc-500 ml-1.5">${hoveredDay.cost.toFixed(4)}</span>
+              </span>
+            )}
           </div>
         </div>
       )}

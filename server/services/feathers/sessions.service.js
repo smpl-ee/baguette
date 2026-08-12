@@ -14,6 +14,7 @@ import {
   gitFetch,
   gitPush,
   mergePR,
+  markPRReady,
   getPRStatus,
   upsertPR,
   createWorktree,
@@ -228,6 +229,9 @@ export class SessionsService extends KnexService {
     const user = await this.app.service('users').get(session.user_id, {});
     const token = getEffectiveGithubToken(user);
     if (!token) throw new BadRequest('No GitHub token configured');
+    if (session.pr_status === 'draft') {
+      await markPRReady(token, session.repo_full_name, session.pr_number);
+    }
     await mergePR(token, session.repo_full_name, session.pr_number);
     await this.app
       .service('sessions')
@@ -386,18 +390,15 @@ export class SessionsService extends KnexService {
 
     const patch = {};
     if (status !== undefined && session.status !== status) patch.status = status;
-    if (costUpdate !== null) {
+    if (costUpdate !== null && costUpdate > 0) {
       const prevCost = parseFloat(session.total_cost_usd ?? 0);
-      const diff = costUpdate - prevCost;
-      if (diff > 0) {
-        await db('usage').insert({
-          session_id: sessionId,
-          user_id: session.user_id,
-          repo_full_name: session.repo_full_name,
-          cost_usd: diff,
-        });
-      }
-      patch.total_cost_usd = costUpdate;
+      await db('usage').insert({
+        session_id: sessionId,
+        user_id: session.user_id,
+        repo_full_name: session.repo_full_name,
+        cost_usd: costUpdate,
+      });
+      patch.total_cost_usd = prevCost + costUpdate;
     }
     if (Object.keys(patch).length === 0) return;
 
