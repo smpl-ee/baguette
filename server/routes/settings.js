@@ -6,7 +6,7 @@ import path from 'path';
 import * as yaml from 'js-yaml';
 import { DOCKER_COMPOSE_PATH } from '../config.js';
 import { getEffectiveGithubToken } from '../services/agent-settings.js';
-import { listModels } from '../services/anthropic-models.js';
+import { listModels, refreshModels } from '../services/anthropic-models.js';
 import db from '../db.js';
 
 const execFileAsync = promisify(execFile);
@@ -20,6 +20,15 @@ export default function createSettingsRoutes(requireAuth) {
   router.get('/api/settings/models', requireAuth, async (req, res) => {
     try {
       const models = await listModels();
+      res.json({ models });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.post('/api/settings/models/refresh', requireAuth, async (req, res) => {
+    try {
+      const models = await refreshModels();
       res.json({ models });
     } catch (err) {
       res.status(500).json({ error: err.message });

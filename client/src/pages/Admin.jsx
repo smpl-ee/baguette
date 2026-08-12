@@ -637,6 +637,77 @@ function PluginsTab() {
   );
 }
 
+// ─── ModelsTab ────────────────────────────────────────────────────────────────
+
+function ModelsTab() {
+  const [models, setModels] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    apiFetch('/api/settings/models')
+      .then((d) => setModels(d.models))
+      .catch((err) => toastError('Failed to load models', err))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(load, [load]);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      const d = await apiFetch('/api/settings/models/refresh', { method: 'POST' });
+      setModels(d.models);
+      toast.success('Model list refreshed');
+    } catch (err) {
+      toastError('Failed to refresh models', err);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-zinc-400 text-sm">
+          Models are fetched from the Claude Agent SDK and cached for 24 hours.
+        </p>
+        <button
+          onClick={handleRefresh}
+          disabled={refreshing || loading}
+          className="text-sm text-amber-400 hover:text-amber-300 disabled:opacity-50 transition-colors shrink-0 ml-4"
+        >
+          {refreshing ? 'Refreshing…' : 'Refresh cache'}
+        </button>
+      </div>
+
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+        {loading && (
+          <p className="text-zinc-600 text-sm text-center py-8">Loading…</p>
+        )}
+        {!loading && models.length === 0 && (
+          <p className="text-zinc-600 text-sm text-center py-8">No models available</p>
+        )}
+        {models.map((m) => (
+          <div
+            key={m.id}
+            className="flex items-start justify-between px-4 py-3 border-b border-zinc-800 last:border-0 gap-3"
+          >
+            <div className="min-w-0">
+              <div className="text-sm text-white font-medium">{m.display_name}</div>
+              <code className="text-xs text-zinc-500 font-mono">{m.id}</code>
+              {m.description && (
+                <div className="text-xs text-zinc-600 mt-0.5">{m.description}</div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── Admin page ───────────────────────────────────────────────────────────────
 
 const TABS = [
@@ -645,6 +716,7 @@ const TABS = [
   { id: 'plugins', label: 'Plugins' },
   { id: 'docker', label: 'Docker' },
   { id: 'users', label: 'Users' },
+  { id: 'models', label: 'Models' },
 ];
 
 export default function Admin() {
@@ -679,6 +751,7 @@ export default function Admin() {
       {activeTab === 'plugins' && <PluginsTab />}
       {activeTab === 'docker' && <DockerTab />}
       {activeTab === 'users' && <UsersTab />}
+      {activeTab === 'models' && <ModelsTab />}
     </div>
   );
 }
