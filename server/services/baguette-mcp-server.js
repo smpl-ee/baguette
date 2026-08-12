@@ -73,7 +73,11 @@ function annotateWithLineNumbers(diffText) {
   return out.join('\n');
 }
 
-export function buildBaguetteMcpServer(session, app) {
+/**
+ * Creates tool definitions shared between Claude SDK MCP server and Cursor customTools.
+ * Returns an array of { name, description, schema (Zod shape), handler }.
+ */
+function buildBaguetteToolList(session, app) {
   const db = app.get('db');
 
   const getSession = async () => {
@@ -120,16 +124,14 @@ export function buildBaguetteMcpServer(session, app) {
   const absoluteWorktreePath = resolveDataDirRelativePath(session.worktree_path) || '';
   const { base_branch: baseBranch } = session;
 
-  return createSdkMcpServer({
-    name: 'baguette',
-    tools: [
+  return [
       // ── Git ────────────────────────────────────────────────────────────────
 
-      tool(
-        'GitPull',
-        'Pull latest changes from the remote branch into the current worktree.',
-        {},
-        async () => {
+      {
+        name: 'GitPull',
+        description: 'Pull latest changes from the remote branch into the current worktree.',
+        schema: {},
+        handler: async () => {
           if (!session?.remote_branch) return ok({ message: 'No remote branch to pull.' });
           const result = await gitPull(
             absoluteWorktreePath,
@@ -137,62 +139,68 @@ export function buildBaguetteMcpServer(session, app) {
             await getToken()
           );
           return ok(result);
-        }
-      ),
+        },
+      },
 
-      tool('GitPush', 'Push the current branch to origin and set upstream.', {}, async () => {
-        const localErr = await requireGitHubRepo();
-        if (localErr) return localErr;
-        if (!session.auto_push) {
-          return ok({
-            message:
-              'Auto-push is disabled. Changes have been committed locally. The user can push manually or enable auto-push using the controls at the bottom of the chat. You should still call ReadSessionInfo and UpdateSession to ensure the session label and description are up to date.',
-          });
-        }
-        let result;
-        try {
-          result = await gitPush(absoluteWorktreePath, await getToken());
-        } catch (err) {
-          if (err.rejected) return fail(err.message);
-          throw err;
-        }
-        await patchSession({ remote_branch: result.branch, created_branch: result.branch });
-        return ok(result);
-      }),
+      {
+        name: 'GitPush',
+        description: 'Push the current branch to origin and set upstream.',
+        schema: {},
+        handler: async () => {
+          const localErr = await requireGitHubRepo();
+          if (localErr) return localErr;
+          if (!session.auto_push) {
+            return ok({
+              message:
+                'Auto-push is disabled. Changes have been committed locally. The user can push manually or enable auto-push using the controls at the bottom of the chat. You should still call ReadSessionInfo and UpdateSession to ensure the session label and description are up to date.',
+            });
+          }
+          let result;
+          try {
+            result = await gitPush(absoluteWorktreePath, await getToken());
+          } catch (err) {
+            if (err.rejected) return fail(err.message);
+            throw err;
+          }
+          await patchSession({ remote_branch: result.branch, created_branch: result.branch });
+          return ok(result);
+        },
+      },
 
-      tool(
-        'GitFetch',
-        'Fetch a branch from origin without modifying the working tree.',
-        { branch: z.string().describe('Branch name to fetch') },
-        async ({ branch }) => {
+      {
+        name: 'GitFetch',
+        description: 'Fetch a branch from origin without modifying the working tree.',
+        schema: { branch: z.string().describe('Branch name to fetch') },
+        handler: async ({ branch }) => {
           const result = await gitFetch(absoluteWorktreePath, await getToken(), branch);
           return ok(result);
-        }
-      ),
+        },
+      },
 
       // ── PR info ────────────────────────────────────────────────────────────
 
-      tool(
-        'ReadSessionInfo',
-        'Get the current session label (title) and description.',
-        {},
-        async () => {
+      {
+        name: 'ReadSessionInfo',
+        description: 'Get the current session label (title) and description.',
+        schema: {},
+        handler: async () => {
           const session = await getSession();
           return ok({
             label: session?.label ?? null,
             description: session?.pr_description ?? null,
           });
-        }
-      ),
+        },
+      },
 
-      tool(
-        'UpdateSession',
-        'Update the session label (title) and/or description. Use this to keep the session info in sync with the work being done.',
-        {
+      {
+        name: 'UpdateSession',
+        description:
+          'Update the session label (title) and/or description. Use this to keep the session info in sync with the work being done.',
+        schema: {
           label: z.string().optional().describe('Session label / title'),
           description: z.string().optional().describe('Session description (markdown)'),
         },
-        async ({ label, description }) => {
+        handler: async ({ label, description }) => {
           const patch = {};
           if (label !== undefined) patch.label = label;
           if (description !== undefined) patch.pr_description = description;
@@ -201,39 +209,44 @@ export function buildBaguetteMcpServer(session, app) {
           }
           await patchSession(patch);
           return ok({ message: 'Session info updated.' });
-        }
-      ),
+        },
+      },
 
-      tool('PrRead', 'Get the current PR info: URL, number, branch, title, and description.', {}, async () => {
-        const result = {
-          pr_url: session?.pr_url ?? null,
-          pr_number: session?.pr_number ?? null,
-          branch: session?.remote_branch || session?.created_branch || null,
-          title: null,
-          description: null,
-        };
-        if (!result.pr_url) {
-          result.message =
-            'No pull request exists yet. Push your changes first with GitPush, then create one with PrUpsert.';
+      {
+        name: 'PrRead',
+        description: 'Get the current PR info: URL, number, branch, title, and description.',
+        schema: {},
+        handler: async () => {
+          const result = {
+            pr_url: session?.pr_url ?? null,
+            pr_number: session?.pr_number ?? null,
+            branch: session?.remote_branch || session?.created_branch || null,
+            title: null,
+            description: null,
+          };
+          if (!result.pr_url) {
+            result.message =
+              'No pull request exists yet. Push your changes first with GitPush, then create one with PrUpsert.';
+            return ok(result);
+          }
+          const token = await getToken();
+          if (token && session.pr_number) {
+            const pr = await getOpenPRByNumber(token, session.repo_full_name, session.pr_number);
+            result.title = pr.title;
+            result.description = pr.body;
+          }
           return ok(result);
-        }
-        const token = await getToken();
-        if (token && session.pr_number) {
-          const pr = await getOpenPRByNumber(token, session.repo_full_name, session.pr_number);
-          result.title = pr.title;
-          result.description = pr.body;
-        }
-        return ok(result);
-      }),
+        },
+      },
 
-      tool(
-        'PrUpsert',
-        'Create or update the pull request with a title and description.',
-        {
+      {
+        name: 'PrUpsert',
+        description: 'Create or update the pull request with a title and description.',
+        schema: {
           title: z.string().describe('PR title'),
           description: z.string().optional().describe('PR body / description (markdown)'),
         },
-        async ({ title, description = '' }) => {
+        handler: async ({ title, description = '' }) => {
           const localErr = await requireGitHubRepo();
           if (localErr) return localErr;
           // Always persist label and description to session regardless of auto_push
@@ -287,16 +300,16 @@ export function buildBaguetteMcpServer(session, app) {
             });
           }
           return ok({ url: pr.url, number: pr.number });
-        }
-      ),
+        },
+      },
 
       // ── PR comments & review ───────────────────────────────────────────────
 
-      tool(
-        'PrComments',
-        'List PR conversation comments and inline review comments on the diff.',
-        {},
-        async () => {
+      {
+        name: 'PrComments',
+        description: 'List PR conversation comments and inline review comments on the diff.',
+        schema: {},
+        handler: async () => {
           const session = await getSession();
           if (!session?.pr_number) {
             return fail(
@@ -309,19 +322,20 @@ export function buildBaguetteMcpServer(session, app) {
             session.pr_number
           );
           return ok(result);
-        }
-      ),
+        },
+      },
 
-      tool(
-        'PrMarkCommentViewed',
-        'Mark a PR comment as viewed by adding a 👀 eyes reaction on GitHub. Viewed comments are excluded from future PrComments results. Use the comment id from PrComments output.',
-        {
+      {
+        name: 'PrMarkCommentViewed',
+        description:
+          'Mark a PR comment as viewed by adding a 👀 eyes reaction on GitHub. Viewed comments are excluded from future PrComments results. Use the comment id from PrComments output.',
+        schema: {
           commentId: z.number().int().describe('Comment ID from PrComments'),
           commentType: z
             .enum(['issue', 'review'])
             .describe('"issue" for conversation thread comments, "review" for inline review comments'),
         },
-        async ({ commentId, commentType }) => {
+        handler: async ({ commentId, commentType }) => {
           const session = await getSession();
           if (!session?.pr_number) return fail('No pull request associated with this session.');
           const result = await addReactionToComment(
@@ -331,13 +345,14 @@ export function buildBaguetteMcpServer(session, app) {
             commentType
           );
           return ok({ reactionId: result.id, content: result.content });
-        }
-      ),
+        },
+      },
 
-      tool(
-        'PrComment',
-        'Post a comment on the pull request. Omit path/line for a general PR comment; provide both to post an inline comment on a specific line.',
-        {
+      {
+        name: 'PrComment',
+        description:
+          'Post a comment on the pull request. Omit path/line for a general PR comment; provide both to post an inline comment on a specific line.',
+        schema: {
           body: z.string().describe('Comment text (markdown supported)'),
           path: z
             .string()
@@ -355,7 +370,7 @@ export function buildBaguetteMcpServer(session, app) {
               'Which side of the diff: RIGHT for added/context lines (new file), LEFT for deleted lines (old file). Defaults to RIGHT.'
             ),
         },
-        async ({ body, path: filePath, line, side }) => {
+        handler: async ({ body, path: filePath, line, side }) => {
           const session = await getSession();
           if (!session?.pr_number) return fail('No pull request associated with this session.');
           const token = await getToken();
@@ -385,13 +400,14 @@ export function buildBaguetteMcpServer(session, app) {
             bodyWithHeader
           );
           return ok(comment);
-        }
-      ),
+        },
+      },
 
-      tool(
-        'PrReview',
-        'Submit a pull request review decision. Pass inline comments via the `comments` array to have them posted as part of the review rather than as standalone comments.',
-        {
+      {
+        name: 'PrReview',
+        description:
+          'Submit a pull request review decision. Pass inline comments via the `comments` array to have them posted as part of the review rather than as standalone comments.',
+        schema: {
           event: z
             .enum(['approve', 'request-changes', 'comment'])
             .describe('Review decision: approve, request-changes, or comment'),
@@ -413,7 +429,7 @@ export function buildBaguetteMcpServer(session, app) {
             .optional()
             .describe('Inline comments to include as part of the review'),
         },
-        async ({ event, body, comments = [] }) => {
+        handler: async ({ event, body, comments = [] }) => {
           const eventMap = {
             approve: 'APPROVE',
             'request-changes': 'REQUEST_CHANGES',
@@ -440,30 +456,36 @@ export function buildBaguetteMcpServer(session, app) {
             commitId
           );
           return ok(review);
-        }
-      ),
+        },
+      },
 
       // ── CI ─────────────────────────────────────────────────────────────────
 
-      tool('PrWorkflows', 'Get CI workflow run status for the PR branch.', {}, async () => {
-        const localErr = await requireGitHubRepo();
-        if (localErr) return localErr;
-        const session = await getSession();
-        const branch = session?.remote_branch || session?.created_branch;
-        if (!branch) return ok({ runs: [], message: 'No branch available for this session.' });
-        const runs = await getPRWorkflows(await getToken(), session.repo_full_name, branch);
-        return ok({ runs });
-      }),
+      {
+        name: 'PrWorkflows',
+        description: 'Get CI workflow run status for the PR branch.',
+        schema: {},
+        handler: async () => {
+          const localErr = await requireGitHubRepo();
+          if (localErr) return localErr;
+          const session = await getSession();
+          const branch = session?.remote_branch || session?.created_branch;
+          if (!branch) return ok({ runs: [], message: 'No branch available for this session.' });
+          const runs = await getPRWorkflows(await getToken(), session.repo_full_name, branch);
+          return ok({ runs });
+        },
+      },
 
-      tool(
-        'PrWorkflowLogs',
-        'Get logs for a workflow run. Defaults to the last 8000 bytes (where errors appear). Use startByte to read earlier sections; the response includes totalBytes for pagination.',
-        {
+      {
+        name: 'PrWorkflowLogs',
+        description:
+          'Get logs for a workflow run. Defaults to the last 8000 bytes (where errors appear). Use startByte to read earlier sections; the response includes totalBytes for pagination.',
+        schema: {
           runId: z.string().describe('Workflow run ID from PrWorkflows'),
           startByte: z.number().optional().describe('Start byte offset for partial log fetch'),
           endByte: z.number().optional().describe('End byte offset for partial log fetch'),
         },
-        async ({ runId, startByte, endByte }) => {
+        handler: async ({ runId, startByte, endByte }) => {
           const localErr = await requireGitHubRepo();
           if (localErr) return localErr;
           const session = await getSession();
@@ -472,16 +494,17 @@ export function buildBaguetteMcpServer(session, app) {
             endByte,
           });
           return ok(result);
-        }
-      ),
+        },
+      },
 
       // ── Project commands ───────────────────────────────────────────────────
 
-      tool(
-        'ListProjectCommands',
-        'List available project commands defined in .baguette.yaml (tests, linters, migrations, etc.).',
-        {},
-        async () => {
+      {
+        name: 'ListProjectCommands',
+        description:
+          'List available project commands defined in .baguette.yaml (tests, linters, migrations, etc.).',
+        schema: {},
+        handler: async () => {
           let cfg;
           try {
             cfg = await loadBaguetteConfig(session.worktree_path);
@@ -500,13 +523,14 @@ export function buildBaguetteMcpServer(session, app) {
             (c) => c && typeof c.label === 'string' && typeof c.run === 'string'
           );
           return ok({ commands });
-        }
-      ),
+        },
+      },
 
-      tool(
-        'RunProjectCommand',
-        'Run a project command by its label from .baguette.yaml (e.g. "Run tests"). Always use this instead of running scripts directly. Pass args to scope execution: a file path, a test name pattern, or any flag the underlying runner supports (e.g. ["src/foo.test.js"], ["--grep", "my test"], ["-k", "my_test"]). Output is returned as stdoutLines/stderrLines (one terminal line per JSON line).',
-        {
+      {
+        name: 'RunProjectCommand',
+        description:
+          'Run a project command by its label from .baguette.yaml (e.g. "Run tests"). Always use this instead of running scripts directly. Pass args to scope execution: a file path, a test name pattern, or any flag the underlying runner supports (e.g. ["src/foo.test.js"], ["--grep", "my test"], ["-k", "my_test"]). Output is returned as stdoutLines/stderrLines (one terminal line per JSON line).',
+        schema: {
           label: z.string().describe('Command label exactly as returned by ListProjectCommands'),
           args: z
             .array(z.string())
@@ -515,7 +539,7 @@ export function buildBaguetteMcpServer(session, app) {
               'Extra arguments appended to the command (e.g. a test file path, name pattern, or CLI flag)'
             ),
         },
-        async ({ label, args = [] }) => {
+        handler: async ({ label, args = [] }) => {
           let tasks;
           try {
             const cfg = await loadBaguetteConfig(session.worktree_path);
@@ -563,16 +587,17 @@ export function buildBaguetteMcpServer(session, app) {
               )
               .catch((err) => resolve(fail(err.message)));
           });
-        }
-      ),
+        },
+      },
 
       // ── Task lifecycle ──────────────────────────────────────────────────────
 
-      tool(
-        'ListRunningTasks',
-        'List currently running baguette tasks for this session, including their labels and assigned ports.',
-        {},
-        async () => {
+      {
+        name: 'ListRunningTasks',
+        description:
+          'List currently running baguette tasks for this session, including their labels and assigned ports.',
+        schema: {},
+        handler: async () => {
           const tasks = app.service('tasks').filterTasks({
             sessionIds: new Set([session.id]),
             status: 'running',
@@ -580,26 +605,28 @@ export function buildBaguetteMcpServer(session, app) {
           return ok({
             tasks: tasks.map((t) => ({ id: t.id, label: t.label, status: t.status, ports: t.ports })),
           });
-        }
-      ),
+        },
+      },
 
-      tool(
-        'KillTask',
-        'Kill a running baguette task by its ID.',
-        { taskId: z.number().int().describe('Task ID from ListRunningTasks') },
-        async ({ taskId }) => {
+      {
+        name: 'KillTask',
+        description: 'Kill a running baguette task by its ID.',
+        schema: { taskId: z.number().int().describe('Task ID from ListRunningTasks') },
+        handler: async ({ taskId }) => {
           const task = app.service('tasks').getTask(taskId);
           if (!task) return fail(`Task ${taskId} not found`);
-          if (task.session_id !== session.id) return fail(`Task ${taskId} does not belong to this session`);
+          if (task.session_id !== session.id)
+            return fail(`Task ${taskId} does not belong to this session`);
           const killed = await task.kill();
           return ok({ killed, taskId });
-        }
-      ),
+        },
+      },
 
-      tool(
-        'ReadTaskOutput',
-        'Read the log output of a running or exited baguette task. By default returns the last 200 lines. Use offset to read from a specific line position.',
-        {
+      {
+        name: 'ReadTaskOutput',
+        description:
+          'Read the log output of a running or exited baguette task. By default returns the last 200 lines. Use offset to read from a specific line position.',
+        schema: {
           taskId: z.number().int().describe('Task ID from ListRunningTasks'),
           offset: z
             .number()
@@ -612,10 +639,11 @@ export function buildBaguetteMcpServer(session, app) {
             .optional()
             .describe('Maximum number of lines to return (default: 200)'),
         },
-        async ({ taskId, offset, limit = 200 }) => {
+        handler: async ({ taskId, offset, limit = 200 }) => {
           const task = app.service('tasks').getTask(taskId);
           if (!task) return fail(`Task ${taskId} not found`);
-          if (task.session_id !== session.id) return fail(`Task ${taskId} does not belong to this session`);
+          if (task.session_id !== session.id)
+            return fail(`Task ${taskId} does not belong to this session`);
           const allLines = streamToLines(task.getLogs());
           const totalLines = allLines.length;
           let start;
@@ -626,27 +654,28 @@ export function buildBaguetteMcpServer(session, app) {
           }
           const lines = allLines.slice(start, start + limit);
           return ok({ taskId, totalLines, offset: start, lines });
-        }
-      ),
+        },
+      },
 
       // ── Repo config ─────────────────────────────────────────────────────────
 
-      tool(
-        'ConfigRepoPrompt',
-        'Get the onboarding instructions for configuring this repository (.baguette.yaml setup).',
-        {},
-        async () => {
+      {
+        name: 'ConfigRepoPrompt',
+        description:
+          'Get the onboarding instructions for configuring this repository (.baguette.yaml setup).',
+        schema: {},
+        handler: async () => {
           const prompt = await loadPrompt('onboarding-prompt', { DOCKER_COMPOSE_PATH });
           const interactivePrompt = await loadPrompt('onboarding-interactive-prompt');
           return ok({ prompt: [prompt, interactivePrompt].join('\n\n') });
-        }
-      ),
+        },
+      },
 
-      tool(
-        'ConfigRepoStart',
-        'Start a new session dedicated to configuring .baguette.yaml for this repository.',
-        {},
-        async () => {
+      {
+        name: 'ConfigRepoStart',
+        description: 'Start a new session dedicated to configuring .baguette.yaml for this repository.',
+        schema: {},
+        handler: async () => {
           const session = await getSession();
           const repo = await db('repos').where({ id: session.repo_id }).first();
           const prompt = await loadPrompt('onboarding-prompt', { DOCKER_COMPOSE_PATH });
@@ -664,15 +693,16 @@ export function buildBaguetteMcpServer(session, app) {
             sessionPath,
             message: `Configuration session started: ${sessionPath}`,
           });
-        }
-      ),
+        },
+      },
 
       // ── Diff ───────────────────────────────────────────────────────────────
 
-      tool(
-        'GitDiff',
-        'Run git diff relative to the merge-base with the base branch. Automatically computes the correct merge-base so diffs show only changes introduced by this branch.',
-        {
+      {
+        name: 'GitDiff',
+        description:
+          'Run git diff relative to the merge-base with the base branch. Automatically computes the correct merge-base so diffs show only changes introduced by this branch.',
+        schema: {
           args: z
             .array(z.string())
             .optional()
@@ -680,7 +710,7 @@ export function buildBaguetteMcpServer(session, app) {
               'Extra git diff arguments, e.g. ["--name-only"] to list changed files, or ["--", "path/to/file"] for a specific file.'
             ),
         },
-        async ({ args = [] }) => {
+        handler: async ({ args = [] }) => {
           const mergeBase = baseBranch
             ? await execFileAsync('git', ['merge-base', 'HEAD', `origin/${baseBranch}`], {
                 cwd: absoluteWorktreePath,
@@ -707,20 +737,40 @@ export function buildBaguetteMcpServer(session, app) {
           );
           const diff = rawDiff && !isSummary ? annotateWithLineNumbers(rawDiff) : rawDiff;
           return ok({ diff: diff || '(no changes)', base });
-        }
-      ),
+        },
+      },
 
       // ── Diff display ───────────────────────────────────────────────────────
 
-      tool(
-        'ShowDiff',
-        'Display the git diff for a file visually to the user in a diff viewer.',
-        { path: z.string().describe('File path (relative to worktree root) to show diff for') },
-        async ({ path: filePath }) => {
+      {
+        name: 'ShowDiff',
+        description: 'Display the git diff for a file visually to the user in a diff viewer.',
+        schema: { path: z.string().describe('File path (relative to worktree root) to show diff for') },
+        handler: async ({ path: filePath }) => {
           // Diff is fetched client-side via sessionsService.showDiff — nothing returned to agent
           return ok({ path: filePath });
-        }
-      ),
-    ],
+        },
+      },
+  ];
+}
+
+export function buildBaguetteMcpServer(session, app) {
+  const toolList = buildBaguetteToolList(session, app);
+  return createSdkMcpServer({
+    name: 'baguette',
+    tools: toolList.map(({ name, description, schema, handler }) =>
+      tool(name, description, schema, handler)
+    ),
   });
+}
+
+export function buildCursorCustomTools(session, app) {
+  const toolList = buildBaguetteToolList(session, app);
+  return Object.fromEntries(
+    toolList.map(({ name, description, schema, handler }) => {
+      const hasSchema = Object.keys(schema).length > 0;
+      const inputSchema = hasSchema ? z.toJSONSchema(z.object(schema)) : undefined;
+      return [name, { description, inputSchema, execute: (args) => handler(args) }];
+    })
+  );
 }

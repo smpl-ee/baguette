@@ -28,14 +28,18 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
   const [branchName, setBranchName] = persistentState.useState('branchName', '');
   const [autoPush, setAutoPush] = persistentState.useState('autoPush', true);
   const { repos } = useRepoContext();
+  const [agentSdk, setAgentSdk] = globalState.useState('agentSdk', 'claude');
   const [permissionMode, setPermissionMode] = persistentState.useState('permissionMode', 'default');
+  const [cursorMode, setCursorMode] = persistentState.useState('cursorMode', 'agent');
   const [model, setModel] = persistentState.useState('model', '');
   const [models, setModels] = useState([]);
+  const [cursorVariantIdx, setCursorVariantIdx] = useState(null);
   const [selectedPlugins, setSelectedPlugins] = persistentState.useState('plugins', []);
   const [availablePlugins, setAvailablePlugins] = useState([]);
   const [files, setFiles] = useState([]);
   const [fileError, setFileError] = useState(null);
   const initialPromptRef = useRef(null);
+  const isCursor = agentSdk === 'cursor';
 
   const selectedRepo = useMemo(
     () => repos.find((r) => r.full_name === repoFullName),
@@ -61,6 +65,8 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repoFullName, selectedRepo?.default_branch, branches]);
 
+  const cursorDefaultModelRef = useRef('');
+
   useEffect(() => {
     if (!user?.id) return;
     usersService
@@ -69,16 +75,39 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
         if (d?.default_permission_mode && d.default_permission_mode !== 'plan') {
           setPermissionMode((prev) => (prev === 'default' ? d.default_permission_mode : prev));
         }
+        if (d?.default_agent_sdk) {
+          setAgentSdk((prev) => (prev === 'claude' ? d.default_agent_sdk : prev));
+        }
         if (d?.model) {
           setModel((prev) => prev || d.model);
         }
+        if (d?.cursor_model) {
+          cursorDefaultModelRef.current = d.cursor_model;
+          setModel((prev) => (isCursor && !prev ? d.cursor_model : prev));
+        }
       })
-      .catch(() => {});
-    apiFetch('/api/settings/models')
-      .then((d) => setModels(d.models || []))
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
+
+  useEffect(() => {
+    const url = isCursor ? '/api/settings/models?sdk=cursor' : '/api/settings/models';
+    setModels([]);
+    setModel(isCursor && cursorDefaultModelRef.current ? cursorDefaultModelRef.current : '');
+    apiFetch(url)
+      .then((d) => setModels(d.models || []))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agentSdk]);
+
+  useEffect(() => {
+    if (!isCursor) { setCursorVariantIdx(null); return; }
+    const m = models.find((m) => m.id === model);
+    const variants = m?.variants ?? [];
+    const defaultIdx = variants.findIndex((v) => v.is_default);
+    setCursorVariantIdx(variants.length > 0 ? (defaultIdx >= 0 ? defaultIdx : 0) : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model, models]);
 
   useEffect(() => {
     pluginsService
@@ -103,19 +132,34 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
     setFileError(null);
   };
 
-  const buildPayload = ({ planMode }) => ({
-    repoFullName,
-    branch,
-    initialPrompt,
-    files,
-    permissionMode,
-    planMode,
-    model: model || undefined,
-    createNewBranch,
-    branchName: branchName || undefined,
-    autoPush,
-    plugins: selectedPlugins.length > 0 ? selectedPlugins : undefined,
-  });
+  const buildPayload = ({ planMode }) => {
+    const selectedModel = isCursor ? models.find((m) => m.id === model) : null;
+    const selectedVariant =
+      selectedModel?.variants != null && cursorVariantIdx != null
+        ? selectedModel.variants[cursorVariantIdx]
+        : null;
+    const modelPayload = (() => {
+      if (!model) return undefined;
+      if (isCursor && selectedVariant?.params?.length) {
+        return JSON.stringify({ id: model, params: selectedVariant.params });
+      }
+      return model;
+    })();
+    return {
+      repoFullName,
+      branch,
+      initialPrompt,
+      files,
+      permissionMode: isCursor ? 'default' : permissionMode,
+      planMode: isCursor ? cursorMode === 'plan' : planMode,
+      model: modelPayload,
+      createNewBranch,
+      branchName: branchName || undefined,
+      autoPush,
+      plugins: !isCursor && selectedPlugins.length > 0 ? selectedPlugins : undefined,
+      agentSdk,
+    };
+  };
 
   const handleStart = async (e) => {
     e.preventDefault();
@@ -149,6 +193,18 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
 
   return (
     <form onSubmit={handleStart} className="space-y-4">
+      <div className="flex items-center gap-1 p-0.5 bg-zinc-800 rounded-md w-fit">
+        {['claude', 'cursor'].map((sdk) => (
+          <button
+            key={sdk}
+            type="button"
+            onClick={() => setAgentSdk(sdk)}
+            className={`px-3 py-1 rounded text-xs font-medium transition-colors capitalize ${agentSdk === sdk ? 'bg-amber-500 text-zinc-950' : 'text-zinc-400 hover:text-zinc-200'}`}
+          >
+            {sdk}
+          </button>
+        ))}
+      </div>
       <div className="space-y-2">
         <div>
           <label className="mb-1 block text-sm font-medium text-zinc-300">Base branch</label>
@@ -206,7 +262,7 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
             onKeyDown={handleKeyDown}
             rows={3}
             className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2 pr-9 text-sm text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-transparent overflow-y-auto resize-none"
-            placeholder="Describe what you want Claude to do..."
+            placeholder="Describe what you want the agent to do..."
             required
           />
         </FileAttachmentPicker>
@@ -253,6 +309,7 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
                 onChange={(e) => setModel(e.target.value)}
                 className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
               >
+                {models.length === 0 && <option value="">Loading…</option>}
                 {models.map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.display_name}
@@ -260,23 +317,58 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
                 ))}
               </select>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-1">
-                Permission Mode
-              </label>
-              <select
-                value={permissionMode}
-                onChange={(e) => setPermissionMode(e.target.value)}
-                className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
-              >
-                <option value="default">Ask for approval</option>
-                <option value="acceptEdits">Accept Edits</option>
-                <option value="bypassPermissions">Bypass All Permissions</option>
-              </select>
-            </div>
+            {isCursor && (() => {
+              const selectedModel = models.find((m) => m.id === model);
+              const variants = selectedModel?.variants ?? [];
+              return variants.length > 0 ? (
+                <div>
+                  <label className="block text-sm font-medium text-zinc-300 mb-1">Variant</label>
+                  <select
+                    value={cursorVariantIdx ?? 0}
+                    onChange={(e) => setCursorVariantIdx(parseInt(e.target.value))}
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+                  >
+                    {variants.map((v, i) => (
+                      <option key={i} value={i}>
+                        {v.params?.map((p) => `${p.id}=${p.value}`).join(', ') || v.display_name}
+                        {v.is_default ? ' (default)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : null;
+            })()}
+            {isCursor ? (
+              <div>
+                <label className="block text-sm font-medium text-zinc-300 mb-1">Agent Mode</label>
+                <select
+                  value={cursorMode}
+                  onChange={(e) => setCursorMode(e.target.value)}
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+                >
+                  <option value="agent">Agent</option>
+                  <option value="plan">Plan</option>
+                </select>
+              </div>
+            ) : (
+              <div>
+                <label className="block text-sm font-medium text-zinc-300 mb-1">
+                  Permission Mode
+                </label>
+                <select
+                  value={permissionMode}
+                  onChange={(e) => setPermissionMode(e.target.value)}
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+                >
+                  <option value="default">Ask for approval</option>
+                  <option value="acceptEdits">Accept Edits</option>
+                  <option value="bypassPermissions">Bypass All Permissions</option>
+                </select>
+              </div>
+            )}
 
-            {/* Plugins */}
-            {availablePlugins.length > 0 && (
+            {/* Plugins — Claude only */}
+            {!isCursor && availablePlugins.length > 0 && (
               <div className="sm:col-span-2">
                 <label className="block text-sm font-medium text-zinc-300 mb-1.5">Plugins</label>
                 <div className="space-y-1.5">
@@ -359,14 +451,16 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
           >
             {loading ? 'Creating...' : 'Start'}
           </button>
-          <button
-            type="button"
-            onClick={handlePlan}
-            disabled={!canSubmit}
-            className="bg-zinc-800 hover:bg-zinc-700 disabled:bg-zinc-800 disabled:text-zinc-600 text-zinc-300 hover:text-white px-5 py-2.5 rounded-md text-sm font-medium transition-colors border border-zinc-700 disabled:border-zinc-700"
-          >
-            Plan
-          </button>
+          {!isCursor && (
+            <button
+              type="button"
+              onClick={handlePlan}
+              disabled={!canSubmit}
+              className="bg-zinc-800 hover:bg-zinc-700 disabled:bg-zinc-800 disabled:text-zinc-600 text-zinc-300 hover:text-white px-5 py-2.5 rounded-md text-sm font-medium transition-colors border border-zinc-700 disabled:border-zinc-700"
+            >
+              Plan
+            </button>
+          )}
         </div>
       </div>
     </form>

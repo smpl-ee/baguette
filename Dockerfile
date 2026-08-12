@@ -39,6 +39,8 @@ RUN apt-get update && apt-get install -y \
     libyaml-dev \
     libicu-dev \
     pkg-config \
+    jq \
+    python3 \
     ripgrep \
     socat \
     zlib1g-dev \

@@ -22,7 +22,12 @@ async function afterCreateNotifySessionsAndAgent(context) {
   if (!context.result) return context;
   const message = context.result;
   await context.app.service('sessions').onMessageCreated(message);
-  await context.app.service('claude-agent').onMessageCreated(message);
+  const session = await context.app.get('db')('sessions').where({ id: message.session_id }).first();
+  if (session?.agent_sdk === 'cursor') {
+    await context.app.service('cursor-agent').onMessageCreated(message);
+  } else {
+    await context.app.service('claude-agent').onMessageCreated(message);
+  }
   return context;
 }
 

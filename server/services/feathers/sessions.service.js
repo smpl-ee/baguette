@@ -99,7 +99,7 @@ export class SessionsService extends KnexService {
     if (!session) throw new NotFound('Session not found');
     if (session.archived_at) throw new BadRequest('Session already archived');
 
-    await this.app.service('claude-agent').stopSession(session.id);
+    await this._stopAgentSession(session);
     await this._runCleanupAndFinalize(session);
     return session;
   }
@@ -146,9 +146,14 @@ export class SessionsService extends KnexService {
     this.emit('patched', updated);
   }
 
+  _stopAgentSession(session) {
+    const service = session.agent_sdk === 'cursor' ? 'cursor-agent' : 'claude-agent';
+    return this.app.service(service).stopSession(session.id);
+  }
+
   async stop(data, params) {
     const session = params.resolvedSession;
-    await this.app.service('claude-agent').stopSession(session.id);
+    await this._stopAgentSession(session);
     await this.app
       .service('sessions')
       .patch(session.id, { status: 'stopped' }, { user: { id: session.user_id } });
@@ -544,8 +549,10 @@ async function prepareSessionEnvironment(context) {
       ? requestedBranchName.toLowerCase().replace(/[^a-z0-9/_.-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || fallbackBranch
       : fallbackBranch;
     try {
+      const agentService =
+        context.data.agent_sdk === 'cursor' ? 'cursor-agent' : 'claude-agent';
       const result = await context.app
-        .service('claude-agent')
+        .service(agentService)
         .generateSessionMetadata(context.data.initial_prompt || '', shortId, context.params.user, repo.full_name);
       if (result.label) context.data.label = result.label;
       if (!requestedBranchName) branchName = result.branchName ? `${branchPrefix}${result.branchName}` : fallbackBranch;
@@ -611,9 +618,12 @@ async function addHasWebserver(context) {
 
 async function syncSessionSettingsAfterPatch(context) {
   if (context.id != null && context.result) {
-    await context.app
-      .service('claude-agent')
-      .syncSessionSettingsFromPatch(context.id, context.result);
+    // Only sync settings for Claude sessions (Cursor SDK handles model/mode per-send)
+    if (context.result.agent_sdk !== 'cursor') {
+      await context.app
+        .service('claude-agent')
+        .syncSessionSettingsFromPatch(context.id, context.result);
+    }
   }
   return context;
 }

@@ -543,6 +543,15 @@ export default function Session() {
                     prUrl={prInfo.url}
                   />
                 )}
+                {(session.agent_sdk || session.model) && (
+                  <span className="hidden sm:inline-flex items-center gap-1 shrink-0 text-xs text-zinc-600">
+                    <span className="text-zinc-700">·</span>
+                    {session.agent_sdk === 'cursor' ? 'Cursor' : 'Claude'}
+                    {session.model && (
+                      <span className="text-zinc-700">{session.model}</span>
+                    )}
+                  </span>
+                )}
               </div>
               <div className="flex min-w-0 items-center gap-2 text-xs">
                 <span className="shrink-0 text-zinc-600">{session.base_branch}</span>
@@ -635,6 +644,15 @@ export default function Session() {
 
                 {showMenu && (
                   <div className="absolute right-0 top-full mt-1 w-56 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl overflow-hidden z-50">
+                    {(session.agent_sdk || session.model) && (
+                      <div className="p-2 border-b border-zinc-800 sm:hidden">
+                        <div className="text-[11px] text-zinc-500 px-2 py-1">Agent</div>
+                        <div className="px-2 py-1 text-xs text-zinc-400">
+                          {session.agent_sdk === 'cursor' ? 'Cursor' : 'Claude'}
+                          {session.model && <span className="ml-1.5 text-zinc-600">{session.model}</span>}
+                        </div>
+                      </div>
+                    )}
                     <div className="p-2 border-b border-zinc-800">
                       <div className="text-[11px] text-zinc-500 px-2 py-1">Model</div>
                       <select

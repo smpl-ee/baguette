@@ -124,6 +124,7 @@ function UsageGraph({ repoFilter }) {
 
 export default function Dashboard() {
   const [creating, setCreating] = useState(false);
+  const [_creatingAgentSdk, setCreatingAgentSdk] = useState('claude');
   const [createError, setCreateError] = useState(null);
   const [formKey, setFormKey] = useState(0);
   const location = useLocation();
@@ -155,6 +156,7 @@ export default function Dashboard() {
     branchName,
     autoPush,
     plugins,
+    agentSdk,
   }) => {
     const params = {
       repo_full_name: repoFullName,
@@ -165,6 +167,7 @@ export default function Dashboard() {
       create_new_branch: createNewBranch ?? true,
       auto_push: autoPush ?? true,
     };
+    if (agentSdk) params.agent_sdk = agentSdk;
     if (model) params.model = model;
     if (branchName) params.branch_name = branchName;
     if (plugins?.length) params.plugins = plugins;
@@ -177,6 +180,7 @@ export default function Dashboard() {
       }
     }
     setCreating(true);
+    setCreatingAgentSdk(agentSdk || 'claude');
     setCreateError(null);
     try {
       await sessionsService.create(params);
@@ -235,7 +239,7 @@ export default function Dashboard() {
               <p className="text-sm font-medium text-zinc-100">
                 {agentType === 'reviewer'
                   ? 'Starting your review session…'
-                  : 'Starting your Claude Code session…'}
+                  : 'Starting your agent session…'}
               </p>
               <p className="text-xs text-zinc-400">This usually only takes a few seconds.</p>
             </div>

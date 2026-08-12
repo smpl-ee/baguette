@@ -177,26 +177,46 @@ function RepositoriesTab({ settings, onSave }) {
   const [importPath, setImportPath] = useState('');
   const [addingImport, setAddingImport] = useState(false);
 
-  // Per-repo Anthropic key state
+  // Per-repo key state (anthropic + cursor)
   const [repoKeyEditingId, setRepoKeyEditingId] = useState(null);
+  const [repoKeyField, setRepoKeyField] = useState('anthropic'); // 'anthropic' | 'cursor'
   const [repoKeyValue, setRepoKeyValue] = useState(null);
   const [repoKeyDirty, setRepoKeyDirty] = useState(false);
   const [repoKeySaving, setRepoKeySaving] = useState(false);
-  // Local override of anthropic_api_key per repo (after save, until refetch)
+  // Local overrides per repo after save, until refetch
   const [repoKeyOverrides, setRepoKeyOverrides] = useState({});
+  const [repoCursorKeyOverrides, setRepoCursorKeyOverrides] = useState({});
+
+  const openRepoKeyEdit = (repoId, field) => {
+    if (repoKeyEditingId === repoId && repoKeyField === field) {
+      setRepoKeyEditingId(null);
+    } else {
+      setRepoKeyEditingId(repoId);
+      setRepoKeyField(field);
+      setRepoKeyValue(null);
+      setRepoKeyDirty(false);
+    }
+  };
 
   const handleRepoKeySave = async (repoId, userRepoId) => {
     setRepoKeySaving(true);
     try {
-      const result = await userReposService.patch(userRepoId, {
-        anthropic_api_key: repoKeyValue ?? '',
-      });
-      setRepoKeyOverrides((prev) => ({ ...prev, [repoId]: result.anthropic_api_key }));
+      if (repoKeyField === 'anthropic') {
+        const result = await userReposService.patch(userRepoId, {
+          anthropic_api_key: repoKeyValue ?? '',
+        });
+        setRepoKeyOverrides((prev) => ({ ...prev, [repoId]: result.anthropic_api_key }));
+      } else {
+        const result = await userReposService.patch(userRepoId, {
+          cursor_api_key: repoKeyValue ?? '',
+        });
+        setRepoCursorKeyOverrides((prev) => ({ ...prev, [repoId]: result.cursor_api_key }));
+      }
       setRepoKeyEditingId(null);
       setRepoKeyValue(null);
       setRepoKeyDirty(false);
     } catch (err) {
-      toastError('Failed to save Anthropic Key', err);
+      toastError(`Failed to save ${repoKeyField === 'anthropic' ? 'Anthropic' : 'Cursor'} Key`, err);
     } finally {
       setRepoKeySaving(false);
     }
@@ -450,9 +470,16 @@ function RepositoriesTab({ settings, onSave }) {
             <p className="text-zinc-600 text-sm text-center py-8">No repositories added</p>
           )}
           {repos.map((r) => {
-            const maskedKey =
+            const maskedAnthropicKey =
               repoKeyOverrides[r.id] !== undefined ? repoKeyOverrides[r.id] : r.anthropic_api_key;
+            const maskedCursorKey =
+              repoCursorKeyOverrides[r.id] !== undefined
+                ? repoCursorKeyOverrides[r.id]
+                : r.cursor_api_key;
             const isEditing = repoKeyEditingId === r.id;
+            const editingAnthropicKey = isEditing && repoKeyField === 'anthropic';
+            const _editingCursorKey = isEditing && repoKeyField === 'cursor';
+            const activeKeyMasked = editingAnthropicKey ? maskedAnthropicKey : maskedCursorKey;
             return (
               <div key={r.id} className="border-b border-zinc-800 last:border-0">
                 <div className="flex items-center justify-between px-4 py-3 gap-3">
@@ -472,20 +499,16 @@ function RepositoriesTab({ settings, onSave }) {
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <button
-                      onClick={() => {
-                        if (isEditing) {
-                          setRepoKeyEditingId(null);
-                          setRepoKeyValue(null);
-                          setRepoKeyDirty(false);
-                        } else {
-                          setRepoKeyEditingId(r.id);
-                          setRepoKeyValue(null);
-                          setRepoKeyDirty(false);
-                        }
-                      }}
-                      className={`text-xs ${maskedKey ? 'text-amber-400 hover:text-amber-300' : 'text-zinc-400 hover:text-zinc-300'}`}
+                      onClick={() => openRepoKeyEdit(r.id, 'anthropic')}
+                      className={`text-xs ${maskedAnthropicKey ? 'text-amber-400 hover:text-amber-300' : 'text-zinc-400 hover:text-zinc-300'}`}
                     >
-                      {maskedKey ? 'Anthropic Key ✓' : 'Anthropic Key'}
+                      {maskedAnthropicKey ? 'Claude Key ✓' : 'Claude Key'}
+                    </button>
+                    <button
+                      onClick={() => openRepoKeyEdit(r.id, 'cursor')}
+                      className={`text-xs ${maskedCursorKey ? 'text-amber-400 hover:text-amber-300' : 'text-zinc-400 hover:text-zinc-300'}`}
+                    >
+                      {maskedCursorKey ? 'Cursor Key ✓' : 'Cursor Key'}
                     </button>
                     <button
                       onClick={() => handleUnlinkClick(r)}
@@ -499,13 +522,16 @@ function RepositoriesTab({ settings, onSave }) {
                 {isEditing && (
                   <div className="px-4 pb-3 space-y-2">
                     <p className="text-xs text-zinc-400">
-                      Anthropic Key for this repo (overrides your account key)
+                      {editingAnthropicKey
+                        ? 'Claude (Anthropic) API key for this repo (overrides your account key)'
+                        : 'Cursor API key for this repo (overrides your account key)'}
                     </p>
                     <div className="flex gap-2 items-center">
                       <div className="flex-1">
                         <MaskedSecretInput
-                          maskedValue={maskedKey}
-                          placeholder="sk-ant-…"
+                          key={`${r.id}-${repoKeyField}`}
+                          maskedValue={activeKeyMasked}
+                          placeholder={editingAnthropicKey ? 'sk-ant-…' : 'cursor-…'}
                           onChange={(val, dirty) => {
                             setRepoKeyValue(val);
                             setRepoKeyDirty(dirty);
@@ -530,7 +556,7 @@ function RepositoriesTab({ settings, onSave }) {
                         Cancel
                       </button>
                     </div>
-                    {maskedKey && (
+                    {activeKeyMasked && (
                       <button
                         onClick={() => {
                           setRepoKeyValue('');
@@ -783,35 +809,78 @@ const PERMISSION_MODES = [
   { value: 'bypassPermissions', label: 'Bypass All Permissions' },
 ];
 
+const AGENT_SDK_OPTIONS = [
+  { value: 'claude', label: 'Claude' },
+  { value: 'cursor', label: 'Cursor' },
+];
+
 function AgentTab({ settings, onSave }) {
   const { user } = useAuth();
-  const [models, setModels] = useState([]);
+  const [claudeModels, setClaudeModels] = useState([]);
+  const [cursorModels, setCursorModels] = useState([]);
   const [model, setModel] = useState('');
+  const [cursorModel, setCursorModel] = useState('');
+  const [defaultAgentSdk, setDefaultAgentSdk] = useState('claude');
   const [permissionMode, setPermissionMode] = useState('default');
   const [anthropicApiKey, setAnthropicApiKey] = useState(null);
   const [anthropicApiKeyDirty, setAnthropicApiKeyDirty] = useState(false);
+  const [cursorApiKey, setCursorApiKey] = useState(null);
+  const [cursorApiKeyDirty, setCursorApiKeyDirty] = useState(false);
   const [branchPrefix, setBranchPrefix] = useState('baguette/');
   const [allowedCommands, setAllowedCommands] = useState([]);
   const [newCommand, setNewCommand] = useState('');
+  const [refreshingClaudeModels, setRefreshingClaudeModels] = useState(false);
+  const [refreshingCursorModels, setRefreshingCursorModels] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     apiFetch('/api/settings/models')
-      .then((d) => setModels(d.models || []))
-      .catch(() => setModels([]));
+      .then((d) => setClaudeModels(d.models || []))
+      .catch(() => setClaudeModels([]));
+    apiFetch('/api/settings/models?sdk=cursor')
+      .then((d) => setCursorModels(d.models || []))
+      .catch(() => setCursorModels([]));
   }, []);
+
+  const handleRefreshClaudeModels = async () => {
+    setRefreshingClaudeModels(true);
+    try {
+      const d = await apiFetch('/api/settings/models/refresh', { method: 'POST' });
+      setClaudeModels(d.models || []);
+    } catch (err) {
+      toastError('Failed to refresh Claude models', err);
+    } finally {
+      setRefreshingClaudeModels(false);
+    }
+  };
+
+  const handleRefreshCursorModels = async () => {
+    setRefreshingCursorModels(true);
+    try {
+      const d = await apiFetch('/api/settings/models?sdk=cursor');
+      setCursorModels(d.models || []);
+    } catch (err) {
+      toastError('Failed to refresh Cursor models', err);
+    } finally {
+      setRefreshingCursorModels(false);
+    }
+  };
 
   useEffect(() => {
     if (!settings) return;
     setModel(settings.model || '');
+    setCursorModel(settings.cursor_model || '');
+    setDefaultAgentSdk(settings.default_agent_sdk || 'claude');
     const mode = settings.default_permission_mode || 'default';
     setPermissionMode(mode === 'plan' ? 'default' : mode);
     setBranchPrefix(settings.branch_prefix ?? 'baguette/');
     setAllowedCommands(settings.allowed_commands || []);
     setAnthropicApiKey(null);
     setAnthropicApiKeyDirty(false);
+    setCursorApiKey(null);
+    setCursorApiKeyDirty(false);
   }, [settings]);
 
   const systemAllowedCommands = settings?.system_allowed_commands || [];
@@ -824,15 +893,20 @@ function AgentTab({ settings, onSave }) {
     try {
       const patch = {
         model,
+        cursor_model: cursorModel,
+        default_agent_sdk: defaultAgentSdk,
         default_permission_mode: permissionMode,
         branch_prefix: branchPrefix,
         allowed_commands: allowedCommands,
       };
       if (anthropicApiKeyDirty) patch.anthropic_api_key = anthropicApiKey ?? '';
+      if (cursorApiKeyDirty) patch.cursor_api_key = cursorApiKey ?? '';
       const updated = await usersService.patch(user.id, patch);
       onSave(updated);
       setAnthropicApiKey(null);
       setAnthropicApiKeyDirty(false);
+      setCursorApiKey(null);
+      setCursorApiKeyDirty(false);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (err) {
@@ -843,45 +917,32 @@ function AgentTab({ settings, onSave }) {
   };
 
   return (
-    <form onSubmit={handleSave} className="space-y-6">
+    <form onSubmit={handleSave} className="space-y-8">
       {error && (
         <div className="bg-red-900/30 border border-red-700 rounded-lg px-4 py-3 text-sm text-red-300">
           {error}
         </div>
       )}
 
+      {/* General */}
       <div className="space-y-4 max-w-xl">
+        <h2 className="text-sm font-semibold text-zinc-300">General</h2>
         <div>
-          <label className="block text-sm font-medium text-zinc-300 mb-1">Model</label>
+          <label className="block text-sm font-medium text-zinc-300 mb-1">Default agent</label>
           <select
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
+            value={defaultAgentSdk}
+            onChange={(e) => setDefaultAgentSdk(e.target.value)}
             className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
           >
-            {models.length === 0 && <option value={model || ''}>{model || 'Loading…'}</option>}
-            {model && !models.some((m) => m.id === model) && <option value={model}>{model}</option>}
-            {models.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.display_name}
+            {AGENT_SDK_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
               </option>
             ))}
           </select>
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-zinc-300 mb-1">
-            Default permission mode
-          </label>
-          <select
-            value={permissionMode}
-            onChange={(e) => setPermissionMode(e.target.value)}
-            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
-          >
-            {PERMISSION_MODES.map((m) => (
-              <option key={m.value} value={m.value}>
-                {m.label}
-              </option>
-            ))}
-          </select>
+          <p className="mt-1 text-xs text-zinc-500">
+            Which agent SDK is pre-selected when creating a new session.
+          </p>
         </div>
         <div>
           <label className="block text-sm font-medium text-zinc-300 mb-1">Branch prefix</label>
@@ -968,9 +1029,55 @@ function AgentTab({ settings, onSave }) {
             </button>
           </div>
         </div>
+      </div>
 
+      {/* Claude */}
+      <div className="space-y-4 max-w-xl">
+        <h2 className="text-sm font-semibold text-zinc-300">Claude</h2>
         <div>
-          <label className="block text-sm font-medium text-zinc-300 mb-1">Anthropic Key</label>
+          <label className="block text-sm font-medium text-zinc-300 mb-1">
+            Default permission mode
+          </label>
+          <select
+            value={permissionMode}
+            onChange={(e) => setPermissionMode(e.target.value)}
+            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+          >
+            {PERMISSION_MODES.map((m) => (
+              <option key={m.value} value={m.value}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <label className="text-sm font-medium text-zinc-300">Default model</label>
+            <button
+              type="button"
+              onClick={handleRefreshClaudeModels}
+              disabled={refreshingClaudeModels}
+              className="text-xs text-amber-400 hover:text-amber-300 disabled:opacity-50 transition-colors"
+            >
+              {refreshingClaudeModels ? 'Refreshing…' : '↻ Refresh'}
+            </button>
+          </div>
+          <select
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+          >
+            {claudeModels.length === 0 && <option value={model || ''}>{model || 'Loading…'}</option>}
+            {model && !claudeModels.some((m) => m.id === model) && <option value={model}>{model}</option>}
+            {claudeModels.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.display_name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-zinc-300 mb-1">API Key</label>
           <MaskedSecretInput
             maskedValue={settings?.anthropic_api_key}
             placeholder="sk-ant-…"
@@ -982,6 +1089,51 @@ function AgentTab({ settings, onSave }) {
           <p className="mt-1 text-xs text-zinc-500">
             Leave empty to use Claude Code&apos;s default configuration.
           </p>
+        </div>
+      </div>
+
+      {/* Cursor */}
+      <div className="space-y-4 max-w-xl">
+        <h2 className="text-sm font-semibold text-zinc-300">Cursor</h2>
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <label className="text-sm font-medium text-zinc-300">Default model</label>
+            <button
+              type="button"
+              onClick={handleRefreshCursorModels}
+              disabled={refreshingCursorModels}
+              className="text-xs text-amber-400 hover:text-amber-300 disabled:opacity-50 transition-colors"
+            >
+              {refreshingCursorModels ? 'Refreshing…' : '↻ Refresh'}
+            </button>
+          </div>
+          <select
+            value={cursorModel}
+            onChange={(e) => setCursorModel(e.target.value)}
+            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+          >
+            <option value="">System default</option>
+            {cursorModels.length === 0 && cursorModel && (
+              <option value={cursorModel}>{cursorModel}</option>
+            )}
+            {cursorModels.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.display_name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-zinc-300 mb-1">API Key</label>
+          <MaskedSecretInput
+            maskedValue={settings?.cursor_api_key}
+            placeholder="cursor-…"
+            onChange={(val, dirty) => {
+              setCursorApiKey(val);
+              setCursorApiKeyDirty(dirty);
+            }}
+          />
+          <p className="mt-1 text-xs text-zinc-500">Required to use the Cursor agent SDK.</p>
         </div>
       </div>
 

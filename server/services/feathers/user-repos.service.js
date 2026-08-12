@@ -2,7 +2,10 @@ import { KnexService } from '@feathersjs/knex';
 import { NotFound } from '@feathersjs/errors';
 import { requireUser, scopeByUser, encryptFields, decryptFields } from './hooks.js';
 
-const USER_REPO_SECRETS = { anthropic_api_key: 'anthropic_api_key_encrypted' };
+const USER_REPO_SECRETS = {
+  anthropic_api_key: 'anthropic_api_key_encrypted',
+  cursor_api_key: 'cursor_api_key_encrypted',
+};
 
 class UserReposService extends KnexService {}
 

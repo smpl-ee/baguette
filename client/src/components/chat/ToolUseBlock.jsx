@@ -1,56 +1,33 @@
-import { useState, useMemo, useEffect } from 'react';
-import { sessionsService } from '../../feathers.js';
-import { diffLines } from 'diff';
+import { useState, useMemo } from 'react';
 import { Bot, CheckSquare2, Square, Loader2 } from 'lucide-react';
 import MarkdownContent from '../MarkdownContent.jsx';
+import { messagesService, sessionsService } from '../../feathers.js';
+import { toastError } from '../../utils/toastError.jsx';
 import { stripWorktreePath } from '../../utils/paths.js';
 import { ansiToHtml } from '../../utils/ansi.js';
-
-function EditDiffPreview({ oldString, newString, maxLines = 5, onExpand }) {
-  const parts = diffLines(oldString ?? '', newString ?? '');
-  const lines = [];
-  for (const part of parts) {
-    if (part.added || part.removed) {
-      const prefix = part.added ? '+' : '-';
-      const cls = part.added ? 'text-green-400' : 'text-red-400';
-      const raw = part.value.split('\n');
-      if (raw[raw.length - 1] === '') raw.pop();
-      for (const line of raw) {
-        lines.push({ prefix, cls, line });
-        if (lines.length >= maxLines) break;
-      }
-    }
-    if (lines.length >= maxLines) break;
-  }
-  const totalChanged = parts.reduce((acc, p) => {
-    if (!p.added && !p.removed) return acc;
-    const raw = p.value.split('\n');
-    if (raw[raw.length - 1] === '') raw.pop();
-    return acc + raw.length;
-  }, 0);
-  const remaining = totalChanged - maxLines;
-
-  return (
-    <pre className="px-3 sm:px-4 pb-2 text-xs font-mono bg-transparent overflow-hidden">
-      {lines.map((l, i) => (
-        <div key={i} className={l.cls}>
-          {l.prefix}
-          {l.line}
-        </div>
-      ))}
-      {remaining > 0 && (
-        <button
-          onClick={onExpand}
-          className="text-zinc-600 hover:text-zinc-400 transition-colors text-left"
-        >
-          &hellip; {remaining} more line{remaining !== 1 ? 's' : ''}
-        </button>
-      )}
-    </pre>
-  );
-}
+import EditDiffView from './EditDiffView.jsx';
+import BaguetteMcpToolBlock, {
+  QuietToolBlock,
+  PrUpsertBlock,
+  CommandBlock,
+} from './BaguetteMcpToolBlock.jsx';
+import CursorMcpToolBlock from './CursorMcpToolBlock.jsx';
 
 const QUIET_TOOLS = new Set(['Glob', 'Read', 'Grep']);
+
+// Cursor SDK tool name → Claude tool name alias for shared rendering
+const CURSOR_TOOL_ALIAS = {
+  shell: 'Bash',
+  read: 'Read',
+  write: 'Write',
+  edit: 'Edit',
+  glob: 'Glob',
+  grep: 'Grep',
+  task: 'Task',
+};
+
+// Cursor-only tools displayed as quiet read-only blocks
+const CURSOR_QUIET_TOOLS = new Set(['ls', 'semSearch', 'readLints']);
 
 function parseQuotedArgs(str) {
   const result = [];
@@ -140,215 +117,13 @@ function TodoBlock({ todos }) {
   );
 }
 
-function QuietToolBlock({ icon, label, detail, isError, result }) {
-  const [expanded, setExpanded] = useState(false);
-  const isRunning = result == null;
-  return (
-    <div
-      onClick={() => setExpanded((e) => !e)}
-      className="text-xs font-mono py-0.5 pl-1 cursor-pointer overflow-hidden"
-    >
-      <div className="flex items-center gap-1.5 text-zinc-700">
-        <span>{icon ?? '↳'}</span>
-        <span className={isError ? 'text-red-700' : ''}>{label}</span>
-        {detail && <span className="truncate text-zinc-800">{detail}</span>}
-        {isError && <span className="text-red-700 ml-0.5">[error]</span>}
-        {isRunning && !isError && (
-          <div className="w-2.5 h-2.5 border border-zinc-700 border-t-zinc-500 rounded-full animate-spin shrink-0" />
-        )}
-      </div>
-      {expanded && result != null && (
-        <pre className="mt-1 pl-3 text-zinc-700 whitespace-pre-wrap overflow-auto max-h-48">
-          {result}
-        </pre>
-      )}
-    </div>
-  );
-}
-
-function CommandBlock({ baguetteOp, block }) {
-  const [expanded, setExpanded] = useState(false);
-  const isRunning = block.result == null;
-  let parsed = null;
-  if (typeof block.result === 'string') {
-    try {
-      parsed = JSON.parse(block.result);
-    } catch {
-      parsed = null;
-    }
-  } else if (block.result && typeof block.result === 'object') {
-    parsed = block.result;
-  }
-
-  const exitCode = parsed?.exitCode;
-  const stdout = Array.isArray(parsed?.stdoutLines)
-    ? parsed.stdoutLines.join('\n')
-    : (parsed?.stdout ?? '');
-  const stderr = Array.isArray(parsed?.stderrLines)
-    ? parsed.stderrLines.join('\n')
-    : (parsed?.stderr ?? '');
-  const ok = parsed?.ok;
-  const stdoutHtml = useMemo(() => (stdout ? ansiToHtml(stdout) : ''), [stdout]);
-  const stderrHtml = useMemo(() => (stderr ? ansiToHtml(stderr) : ''), [stderr]);
-
-  const hasError =
-    block.isError || ok === false || (typeof exitCode === 'number' && exitCode !== 0);
-
-  return (
-    <div
-      className={`bg-zinc-900/50 rounded-lg border overflow-hidden ${hasError ? 'border-red-800/60' : 'border-zinc-800'}`}
-    >
-      <button
-        onClick={() => setExpanded((e) => !e)}
-        className="w-full flex items-center justify-between px-3 sm:px-4 py-2 text-left hover:bg-zinc-800/50 transition-colors gap-2"
-      >
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="text-amber-400 text-xs font-mono shrink-0">command</span>
-          {hasError && (
-            <span className="shrink-0 text-red-400 text-xs font-medium bg-red-950/40 px-1.5 py-0.5 rounded">
-              {typeof exitCode === 'number' ? `exit ${exitCode}` : 'error'}
-            </span>
-          )}
-          <span className="text-xs text-zinc-300 truncate">
-            {baguetteOp.arg?.label || '(no label)'}
-          </span>
-          {Array.isArray(baguetteOp.arg?.args) && baguetteOp.arg.args.length > 0 && (
-            <code className="text-[10px] text-zinc-500 truncate">
-              {baguetteOp.arg.args.join(' ')}
-            </code>
-          )}
-        </div>
-        {isRunning ? (
-          <div className="w-3.5 h-3.5 border border-zinc-600 border-t-zinc-400 rounded-full animate-spin shrink-0" />
-        ) : (
-          <svg
-            className={`w-4 h-4 text-zinc-500 shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        )}
-      </button>
-      {expanded && (
-        <div className="px-3 sm:px-4 py-3 border-t border-zinc-800 text-xs space-y-3">
-          {stdout && (
-            <div>
-              <div className="text-zinc-500 font-medium mb-1">stdout</div>
-              <pre
-                className="whitespace-pre-wrap overflow-auto max-h-80 rounded p-2 text-zinc-300 bg-zinc-950/50"
-                dangerouslySetInnerHTML={{ __html: stdoutHtml }}
-              />
-            </div>
-          )}
-          {stderr && (
-            <div>
-              <div className="text-zinc-500 font-medium mb-1">stderr</div>
-              <pre
-                className="whitespace-pre-wrap overflow-auto max-h-80 rounded p-2 text-red-300 bg-red-950/30"
-                dangerouslySetInnerHTML={{ __html: stderrHtml }}
-              />
-            </div>
-          )}
-          {!stdout && !stderr && block.result != null && (
-            <div>
-              <div className="text-zinc-500 font-medium mb-1">Result</div>
-              <pre className="whitespace-pre-wrap overflow-auto max-h-80 rounded p-2 text-zinc-400 bg-zinc-950/50">
-                {typeof block.result === 'string'
-                  ? block.result
-                  : JSON.stringify(block.result, null, 2)}
-              </pre>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function PrUpsertBlock({ title, body, result, isError }) {
-  const [expanded, setExpanded] = useState(false);
-  const isRunning = result == null;
-  const PREVIEW_LINES = 4;
-  const bodyLines = (body ?? '').split('\n');
-  const previewBody = bodyLines.slice(0, PREVIEW_LINES).join('\n');
-  const remaining = bodyLines.length - PREVIEW_LINES;
-
-  return (
-    <div
-      className={`bg-zinc-900/50 rounded-lg border overflow-hidden ${isError ? 'border-red-800/60' : 'border-indigo-900/50'}`}
-    >
-      <button
-        onClick={() => setExpanded((e) => !e)}
-        className="w-full flex items-center justify-between px-3 sm:px-4 py-2 text-left hover:bg-zinc-800/50 transition-colors gap-2"
-      >
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="text-amber-400 text-xs font-mono shrink-0">Pull Request</span>
-          {isError && (
-            <span className="shrink-0 text-red-400 text-xs font-medium bg-red-950/40 px-1.5 py-0.5 rounded">
-              error
-            </span>
-          )}
-          <span className="text-white text-xs font-semibold truncate">{title}</span>
-        </div>
-        {isRunning ? (
-          <div className="w-3.5 h-3.5 border border-zinc-600 border-t-zinc-400 rounded-full animate-spin shrink-0" />
-        ) : (
-          <svg
-            className={`w-4 h-4 text-zinc-500 shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        )}
-      </button>
-      {!expanded && body && (
-        <div className="px-3 sm:px-4 pb-2 text-xs text-zinc-500">
-          <MarkdownContent>{previewBody}</MarkdownContent>
-          {remaining > 0 && (
-            <button
-              onClick={() => setExpanded(true)}
-              className="text-zinc-600 hover:text-zinc-400 transition-colors mt-1 font-mono"
-            >
-              &hellip; {remaining} more line{remaining !== 1 ? 's' : ''}
-            </button>
-          )}
-        </div>
-      )}
-      {expanded && (
-        <div className="px-3 sm:px-4 py-3 border-t border-zinc-800 text-xs space-y-3">
-          <div className="text-zinc-400">
-            <MarkdownContent>{body ?? ''}</MarkdownContent>
-          </div>
-          {result != null && (
-            <div>
-              <div className={`font-medium mb-1 ${isError ? 'text-red-400' : 'text-zinc-500'}`}>
-                {isError ? 'Error' : 'Result'}
-              </div>
-              <pre
-                className={`whitespace-pre-wrap overflow-auto max-h-80 rounded p-2 ${isError ? 'text-red-300 bg-red-950/30' : 'text-zinc-400 bg-zinc-950/50'}`}
-              >
-                {result}
-              </pre>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-const ACTIVITY_PREVIEW = 8;
-
 function AgentTaskBlock({ block }) {
   const [expanded, setExpanded] = useState(false);
   const hasResult = block.result != null;
   const description = block.input?.description || 'Task';
   const subagentType = block.input?.subagent_type;
   const activities = block.agentActivities || [];
+  const ACTIVITY_PREVIEW = 8;
   const hidden = !expanded && activities.length > ACTIVITY_PREVIEW;
   const displayLines = hidden ? activities.slice(-ACTIVITY_PREVIEW) : activities;
 
@@ -416,272 +191,255 @@ function AgentTaskBlock({ block }) {
   );
 }
 
-function ShowDiffBlock({ path: filePath, sessionId }) {
-  const [expanded, setExpanded] = useState(false);
-  const [diff, setDiff] = useState(null);
-  const [error, setError] = useState(null);
+function CursorPlanBlock({ block, sessionId }) {
+  const [continuePlanning, setContinuePlanning] = useState(false);
+  const [feedback, setFeedback] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [expanded, setExpanded] = useState(true);
 
-  useEffect(() => {
-    if (!sessionId || !filePath) return;
-    sessionsService
-      .showDiff({ id: sessionId, path: filePath })
-      .then((res) => {
-        if (res.error) setError(res.error);
-        setDiff(res.diff ?? '');
-      })
-      .catch((err) => {
-        setError(err?.message ?? 'Failed to load diff');
-        setDiff('');
-      });
-  }, [sessionId, filePath]);
+  const planMarkdown = block.input?.plan ?? block.input?.description ?? block.input?.content ?? '';
+  const firstHeading = planMarkdown.split('\n').find((l) => l.startsWith('# '))?.slice(2) ?? 'Plan';
 
-  if (diff === null && !error) {
-    return (
-      <div className="rounded-lg border border-zinc-700 bg-zinc-900 p-3 text-xs text-zinc-500">
-        Loading diff for <span className="text-zinc-400 font-mono">{filePath}</span>…
-      </div>
-    );
-  }
+  const sendMsg = (text) =>
+    messagesService.create({
+      session_id: sessionId,
+      type: 'user',
+      message_json: JSON.stringify({ type: 'user', message: { role: 'user', content: text } }),
+    });
 
-  if (error) {
-    return (
-      <div className="rounded-lg border border-red-800/50 bg-zinc-900 p-3 text-xs">
-        <span className="text-zinc-400 font-mono">{filePath}</span>
-        <span className="ml-2 text-red-400">{error}</span>
-      </div>
-    );
-  }
-
-  const lines = (diff || '').split('\n');
-  const hunks = [];
-  let current = null;
-
-  for (const line of lines) {
-    if (line.startsWith('@@')) {
-      if (current) hunks.push(current);
-      current = { header: line, lines: [] };
-    } else if (current) {
-      current.lines.push(line);
+  const handleRun = async () => {
+    setLoading(true);
+    try {
+      await sessionsService.patch(sessionId, { plan_mode: false });
+      await sendMsg('Proceed with the plan.');
+    } catch (err) {
+      toastError('Failed to run plan', err);
+      setLoading(false);
     }
-  }
-  if (current) hunks.push(current);
+  };
 
-  const PREVIEW_LINES = 12;
-  const allLines = hunks.flatMap((h) => [
-    { type: 'hunk', text: h.header },
-    ...h.lines.map((l) => ({ type: 'line', text: l })),
-  ]);
-  const preview = allLines.slice(0, PREVIEW_LINES);
-  const shown = expanded ? allLines : preview;
-  const hasMore = allLines.length > PREVIEW_LINES;
-
-  if (!diff || diff === '(no diff)') {
-    return (
-      <div className="rounded-lg border border-zinc-700 bg-zinc-900 text-xs font-mono overflow-hidden">
-        <div className="px-3 py-2 flex items-center gap-2 border-b border-zinc-700 bg-zinc-800/50">
-          <span className="text-zinc-400">diff</span>
-          <span className="text-white">{filePath}</span>
-        </div>
-        <div className="px-3 py-2 text-zinc-500 italic">No changes</div>
-      </div>
-    );
-  }
+  const handleContinue = async () => {
+    const text = feedback.trim() || 'Please continue planning and refine the plan further.';
+    setLoading(true);
+    try {
+      await sendMsg(text);
+      setContinuePlanning(false);
+      setFeedback('');
+    } catch (err) {
+      toastError('Failed to send feedback', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
-    <div className="rounded-lg border border-zinc-700 bg-zinc-900 text-xs font-mono overflow-hidden">
-      <div className="px-3 py-2 flex items-center gap-2 border-b border-zinc-700 bg-zinc-800/50">
-        <span className="text-zinc-400">diff</span>
-        <span className="text-white truncate">{filePath}</span>
-      </div>
-      <div className="overflow-x-auto">
-        <pre className="px-3 py-2 leading-5">
-          {shown.map((l, i) => {
-            if (l.type === 'hunk') {
-              return (
-                <div key={i} className="text-cyan-500/80">
-                  {l.text}
-                </div>
-              );
-            }
-            const ch = l.text[0];
-            const cls =
-              ch === '+'
-                ? 'text-green-400 bg-green-950/30'
-                : ch === '-'
-                  ? 'text-red-400 bg-red-950/30'
-                  : 'text-zinc-400';
-            return (
-              <div key={i} className={`${cls} min-w-0`}>
-                {l.text || ' '}
-              </div>
-            );
-          })}
-        </pre>
-      </div>
-      {hasMore && (
-        <button
-          onClick={() => setExpanded((v) => !v)}
-          className="w-full px-3 py-1.5 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 border-t border-zinc-700 transition-colors text-left"
+    <div className="bg-zinc-900/50 rounded-lg border border-amber-500/20 overflow-hidden">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center gap-2 px-3 sm:px-4 py-2 text-left hover:bg-zinc-800/50 transition-colors"
+      >
+        <span className="text-amber-400 text-xs font-mono shrink-0">Plan</span>
+        <span className="text-zinc-200 text-xs font-medium truncate flex-1">{firstHeading}</span>
+        <svg
+          className={`w-4 h-4 text-zinc-500 shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`}
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
         >
-          {expanded ? '↑ Show less' : `↓ Show all ${allLines.length} lines`}
-        </button>
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {expanded && planMarkdown && (
+        <div className="px-3 sm:px-4 py-3 border-t border-amber-500/15 text-xs text-zinc-300 overflow-auto max-h-[60vh]">
+          <MarkdownContent>{planMarkdown}</MarkdownContent>
+        </div>
+      )}
+
+      {!continuePlanning && (
+        <div className="px-3 sm:px-4 py-2.5 border-t border-amber-500/10 flex gap-2">
+          <button
+            onClick={handleRun}
+            disabled={loading}
+            className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white rounded text-xs font-medium transition-colors"
+          >
+            Run the plan
+          </button>
+          <button
+            onClick={() => setContinuePlanning(true)}
+            disabled={loading}
+            className="px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 text-zinc-200 rounded text-xs font-medium transition-colors"
+          >
+            Continue planning
+          </button>
+        </div>
+      )}
+
+      {continuePlanning && (
+        <div className="px-3 sm:px-4 py-3 border-t border-amber-500/10 space-y-2">
+          <textarea
+            autoFocus
+            value={feedback}
+            onChange={(e) => setFeedback(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleContinue();
+              if (e.key === 'Escape') {
+                setContinuePlanning(false);
+                setFeedback('');
+              }
+            }}
+            placeholder="What should be refined? (optional — leave blank to ask for general improvements)"
+            className="w-full px-3 py-2 bg-zinc-800 border border-zinc-600 text-zinc-100 rounded text-xs resize-none focus:outline-none focus:border-zinc-400 placeholder-zinc-500"
+            rows={3}
+          />
+          <div className="flex gap-2">
+            <button
+              onClick={handleContinue}
+              disabled={loading}
+              className="px-3 py-1.5 bg-zinc-600 hover:bg-zinc-500 disabled:opacity-50 text-white rounded text-xs font-medium transition-colors"
+            >
+              Send feedback
+            </button>
+            <button
+              onClick={() => {
+                setContinuePlanning(false);
+                setFeedback('');
+              }}
+              className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 rounded text-xs font-medium transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
 }
 
 export default function ToolUseBlock({ block, worktreePath, sessionId }) {
-  const [expanded, setExpanded] = useState(false);
-  const hasResult = block.result != null;
-  const bashResultHtml = useMemo(() => {
-    if (block.name !== 'Bash' || typeof block.result !== 'string') return null;
-    return ansiToHtml(block.result);
-  }, [block.name, block.result]);
+  // Resolve Cursor SDK tool name aliases to their Claude equivalents
+  const effectiveName = CURSOR_TOOL_ALIAS[block.name] ?? block.name;
+  let resolvedBlock = effectiveName !== block.name ? { ...block, name: effectiveName } : block;
 
-  const filePath = block.input?.file_path
-    ? stripWorktreePath(block.input.file_path, worktreePath)
+  // Normalize Cursor camelCase file tool inputs → Claude snake_case convention
+  if (block.name === 'edit' || block.name === 'write' || block.name === 'read') {
+    const inp = resolvedBlock.input ?? {};
+    resolvedBlock = {
+      ...resolvedBlock,
+      input: {
+        ...inp,
+        file_path: inp.path ?? inp.file_path,
+        old_string: inp.oldString ?? inp.old_string ?? null,
+        new_string: inp.newString ?? inp.new_string ?? null,
+        content: inp.newContent ?? inp.content ?? null,
+      },
+    };
+  }
+
+  const [expanded, setExpanded] = useState(false);
+  const hasResult = resolvedBlock.result != null;
+
+  // Parse Cursor's native edit/write result: {status, value: {diffString, linesAdded, linesRemoved}}
+  const cursorNativeDiff = useMemo(() => {
+    if (block.name !== 'edit' && block.name !== 'write') return null;
+    if (!resolvedBlock.result) return null;
+    try {
+      const r =
+        typeof resolvedBlock.result === 'string'
+          ? JSON.parse(resolvedBlock.result)
+          : resolvedBlock.result;
+      return r?.value?.diffString ? r.value : null;
+    } catch {
+      return null;
+    }
+  }, [block.name, resolvedBlock.result]);
+
+  const bashResultHtml = useMemo(() => {
+    if (effectiveName !== 'Bash') return null;
+    const r = resolvedBlock.result;
+    if (typeof r === 'string') return ansiToHtml(r);
+    if (r && typeof r === 'object') {
+      let parsed = r;
+      if (typeof r === 'string') {
+        try {
+          parsed = JSON.parse(r);
+        } catch {
+          return null;
+        }
+      }
+      const out = [parsed.stdout, parsed.stderr ? `[stderr]\n${parsed.stderr}` : '']
+        .filter(Boolean)
+        .join('\n');
+      return out ? ansiToHtml(out) : null;
+    }
+    return null;
+  }, [effectiveName, resolvedBlock.result]);
+
+  const filePath = resolvedBlock.input?.file_path
+    ? stripWorktreePath(resolvedBlock.input.file_path, worktreePath)
     : null;
 
-  // TodoWrite tool: render a todo list
-  if (block.name === 'TodoWrite') {
-    return <TodoBlock todos={block.input?.todos} />;
-  }
-
-  // Task / Agent tool: agent icon + spinner + collapsible activity log + final result
-  if (block.name === 'Task' || block.name === 'Agent') {
-    return <AgentTaskBlock block={block} />;
-  }
-
-  // Quiet tools: Glob, Read, Grep
-  if (QUIET_TOOLS.has(block.name)) {
-    let detail;
-    if (block.name === 'Glob') {
-      detail = block.input?.pattern;
-    } else if (block.name === 'Grep') {
-      detail = [
-        block.input?.pattern,
-        block.input?.path ? stripWorktreePath(block.input.path, worktreePath) : null,
-      ]
-        .filter(Boolean)
-        .join(' ');
-    } else {
-      detail = filePath ?? block.input?.file_path;
-    }
-    return (
-      <QuietToolBlock
-        label={block.name}
-        detail={detail}
-        isError={block.isError}
-        result={block.result}
-      />
-    );
+  // Cursor mcp meta-tool: unwrap and delegate
+  if (block.name === 'mcp') {
+    return <CursorMcpToolBlock block={block} worktreePath={worktreePath} sessionId={sessionId} />;
   }
 
   // Baguette MCP tools
   if (block.name?.startsWith('mcp__baguette__')) {
-    const toolShortName = block.name.replace('mcp__baguette__', '');
-    let mcpResult = null;
-    try {
-      mcpResult = JSON.parse(block.result);
-    } catch {
-      /* ignore */
-    }
+    return <BaguetteMcpToolBlock block={block} sessionId={sessionId} />;
+  }
 
-    if (toolShortName === 'ShowDiff') {
-      return (
-        <div>
-          <QuietToolBlock
-            icon="⚙"
-            label="ShowDiff"
-            detail={block.input?.path}
-            isError={block.isError}
-          />
-          <ShowDiffBlock path={block.input?.path ?? ''} sessionId={sessionId} />
-        </div>
-      );
-    }
-    if (toolShortName === 'PrUpsert') {
-      return (
-        <PrUpsertBlock
-          title={block.input?.title ?? '(no title)'}
-          body={block.input?.description ?? ''}
-          result={block.result}
-          isError={block.isError}
-        />
-      );
-    }
-    if (toolShortName === 'RunProjectCommand') {
-      return (
-        <CommandBlock
-          baguetteOp={{ arg: { label: block.input?.label ?? '', args: block.input?.args ?? [] } }}
-          block={{ ...block, result: block.result }}
-        />
-      );
-    }
-    if (toolShortName === 'PrComment') {
-      const body = block.input?.body ?? '';
-      const path = block.input?.path;
-      const line = block.input?.line;
-      const preview = body.length > 60 ? body.slice(0, 57) + '…' : body;
-      const detail = path && line ? `${path}:${line} — ${preview}` : preview;
-      return (
-        <QuietToolBlock
-          icon="⚙"
-          label={path && line ? 'PrComment (inline)' : 'PrComment'}
-          detail={detail}
-          isError={block.isError}
-          result={block.result}
-        />
-      );
-    }
-    if (toolShortName === 'PrReview') {
-      const commentCount = block.input?.comments?.length ?? 0;
-      const detail = [
-        block.input?.body?.slice(0, 60),
-        commentCount > 0 ? `${commentCount} inline comment${commentCount > 1 ? 's' : ''}` : null,
+  // TodoWrite / updateTodos
+  if (effectiveName === 'TodoWrite' || block.name === 'updateTodos') {
+    return <TodoBlock todos={resolvedBlock.input?.todos} />;
+  }
+
+  // createPlan: Cursor plan-mode result
+  if (block.name === 'createPlan') {
+    return <CursorPlanBlock block={resolvedBlock} sessionId={sessionId} />;
+  }
+
+  // Task / Agent tool
+  if (effectiveName === 'Task' || effectiveName === 'Agent') {
+    return <AgentTaskBlock block={resolvedBlock} />;
+  }
+
+  // Quiet tools: Glob, Read, Grep + Cursor-only quiet tools
+  if (QUIET_TOOLS.has(effectiveName) || CURSOR_QUIET_TOOLS.has(block.name)) {
+    let detail;
+    const label = effectiveName !== block.name ? effectiveName : block.name;
+    if (effectiveName === 'Glob' || block.name === 'ls') {
+      detail = resolvedBlock.input?.pattern ?? resolvedBlock.input?.path;
+    } else if (effectiveName === 'Grep' || block.name === 'semSearch') {
+      detail = [
+        resolvedBlock.input?.pattern ?? resolvedBlock.input?.query,
+        resolvedBlock.input?.path ? stripWorktreePath(resolvedBlock.input.path, worktreePath) : null,
       ]
         .filter(Boolean)
-        .join(' · ');
-      return (
-        <QuietToolBlock
-          icon="⚙"
-          label={`PrReview:${block.input?.event ?? ''}`}
-          detail={detail}
-          isError={block.isError}
-          result={block.result}
-        />
-      );
+        .join(' ');
+    } else {
+      detail = filePath ?? resolvedBlock.input?.file_path ?? resolvedBlock.input?.path;
     }
-    // Quiet by default: GitPush, GitPull, GitFetch, PrRead, PrComments, PrWorkflows, PrWorkflowLogs, ListProjectCommands, etc.
-    const detail =
-      toolShortName === 'GitFetch'
-        ? block.input?.branch
-        : toolShortName === 'PrWorkflowLogs'
-          ? `run ${block.input?.runId ?? ''}`
-          : toolShortName === 'RunProjectCommand'
-            ? block.input?.label
-            : (mcpResult?.message ?? undefined);
     return (
       <QuietToolBlock
-        icon="⚙"
-        label={toolShortName}
+        label={label}
         detail={detail}
-        isError={block.isError}
-        result={block.result}
+        isError={resolvedBlock.isError}
+        result={resolvedBlock.result}
       />
     );
   }
 
-  // baguette-op commands (legacy — old sessions only)
-  const baguetteOp = block.name === 'Bash' ? parseBaguetteOp(block.input?.command) : null;
+  // Legacy baguette-op commands (old sessions only)
+  const baguetteOp = effectiveName === 'Bash' ? parseBaguetteOp(resolvedBlock.input?.command) : null;
   if (baguetteOp) {
     if (QUIET_BAGUETTE_OPS.has(baguetteOp.op)) {
       return (
         <QuietToolBlock
           icon="⚙"
           label={baguetteOp.op}
-          isError={block.isError}
-          result={block.result}
+          isError={resolvedBlock.isError}
+          result={resolvedBlock.result}
         />
       );
     }
@@ -690,62 +448,69 @@ export default function ToolUseBlock({ block, worktreePath, sessionId }) {
         <PrUpsertBlock
           title={baguetteOp.arg?.title ?? '(no title)'}
           body={baguetteOp.arg?.body ?? ''}
-          result={block.result}
-          isError={block.isError}
+          result={resolvedBlock.result}
+          isError={resolvedBlock.isError}
         />
       );
     }
     if (baguetteOp.op === 'command') {
-      return <CommandBlock baguetteOp={baguetteOp} block={block} />;
+      return <CommandBlock baguetteOp={baguetteOp} block={resolvedBlock} />;
     }
   }
 
-  const isEditWithDiff = block.name === 'Edit' && block.input?.old_string != null;
-  const isWriteWithContent = block.name === 'Write' && block.input?.content != null;
+  const isEditWithDiff =
+    effectiveName === 'Edit' &&
+    (resolvedBlock.input?.old_string != null || cursorNativeDiff?.diffString != null);
+  const isWriteWithContent =
+    effectiveName === 'Write' &&
+    (resolvedBlock.input?.content != null || cursorNativeDiff?.diffString != null);
 
   // ExitPlanMode with feedback (isError) should show "continue" badge, not "error"
-  const isContinuePlanning = block.name === 'ExitPlanMode' && block.isError;
+  const isContinuePlanning = effectiveName === 'ExitPlanMode' && resolvedBlock.isError;
 
   return (
     <div
-      className={`bg-zinc-900/50 rounded-lg border overflow-hidden ${block.isError && !isContinuePlanning ? 'border-red-800/60' : 'border-zinc-800'}`}
+      className={`bg-zinc-900/50 rounded-lg border overflow-hidden ${resolvedBlock.isError && !isContinuePlanning ? 'border-red-800/60' : 'border-zinc-800'}`}
     >
       <button
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center justify-between px-3 sm:px-4 py-2 text-left hover:bg-zinc-800/50 transition-colors gap-2"
       >
         <div className="flex items-center gap-2 min-w-0">
-          <span className="text-amber-400 text-xs font-mono shrink-0">{block.name}</span>
+          <span className="text-amber-400 text-xs font-mono shrink-0">{effectiveName}</span>
           {isContinuePlanning ? (
             <span className="shrink-0 text-sky-400 text-xs font-medium bg-sky-950/40 px-1.5 py-0.5 rounded">
               continue
             </span>
           ) : (
-            block.isError && (
+            resolvedBlock.isError && (
               <span className="shrink-0 text-red-400 text-xs font-medium bg-red-950/40 px-1.5 py-0.5 rounded">
                 error
               </span>
             )
           )}
-          {block.name === 'Bash' && block.input?.command && (
-            <code className="text-zinc-400 text-xs truncate">{block.input.command}</code>
+          {effectiveName === 'Bash' && resolvedBlock.input?.command && (
+            <code className="text-zinc-400 text-xs truncate">{resolvedBlock.input.command}</code>
           )}
-          {(block.name === 'Write' || block.name === 'Edit') && filePath && (
+          {(effectiveName === 'Write' || effectiveName === 'Edit') && filePath && (
             <code className="text-zinc-400 text-xs truncate">{filePath}</code>
           )}
-          {block.name === 'Glob' && block.input?.pattern && (
-            <code className="text-zinc-400 text-xs truncate">{block.input.pattern}</code>
+          {effectiveName === 'Glob' && resolvedBlock.input?.pattern && (
+            <code className="text-zinc-400 text-xs truncate">{resolvedBlock.input.pattern}</code>
           )}
-          {block.name === 'Grep' && (block.input?.pattern || block.input?.path) && (
-            <code className="text-zinc-400 text-xs truncate">
-              {[
-                block.input.pattern,
-                block.input.path ? stripWorktreePath(block.input.path, worktreePath) : null,
-              ]
-                .filter(Boolean)
-                .join(' ')}
-            </code>
-          )}
+          {effectiveName === 'Grep' &&
+            (resolvedBlock.input?.pattern || resolvedBlock.input?.path) && (
+              <code className="text-zinc-400 text-xs truncate">
+                {[
+                  resolvedBlock.input.pattern,
+                  resolvedBlock.input.path
+                    ? stripWorktreePath(resolvedBlock.input.path, worktreePath)
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+              </code>
+            )}
         </div>
         {!hasResult ? (
           <div className="w-3.5 h-3.5 border border-zinc-600 border-t-zinc-400 rounded-full animate-spin shrink-0" />
@@ -760,76 +525,61 @@ export default function ToolUseBlock({ block, worktreePath, sessionId }) {
           </svg>
         )}
       </button>
+
       {isEditWithDiff && !expanded && (
-        <EditDiffPreview
-          oldString={block.input.old_string}
-          newString={block.input.new_string}
+        <EditDiffView
+          oldString={resolvedBlock.input?.old_string ?? null}
+          newString={resolvedBlock.input?.new_string ?? null}
+          cursorDiff={cursorNativeDiff}
+          collapsed
           onExpand={() => setExpanded(true)}
         />
       )}
       {isWriteWithContent && !expanded && (
-        <EditDiffPreview
-          oldString=""
-          newString={block.input.content}
+        <EditDiffView
+          oldString={resolvedBlock.input?.content != null ? '' : null}
+          newString={resolvedBlock.input?.content ?? null}
+          cursorDiff={cursorNativeDiff}
+          collapsed
           onExpand={() => setExpanded(true)}
+          label="Content"
         />
       )}
+
       {expanded && (
         <div className="px-3 sm:px-4 py-3 border-t border-zinc-800 text-xs space-y-3">
-          {block.name === 'Edit' && block.input?.old_string != null ? (
-            <div>
-              <div className="text-zinc-500 font-medium mb-1">Changes</div>
-              <pre className="text-xs font-mono overflow-auto max-h-96 rounded bg-zinc-950/50">
-                {diffLines(block.input.old_string ?? '', block.input.new_string ?? '').flatMap(
-                  (part, i) => {
-                    const prefix = part.added ? '+' : part.removed ? '-' : ' ';
-                    const cls = part.added
-                      ? 'bg-green-950/60 text-green-300'
-                      : part.removed
-                        ? 'bg-red-950/60 text-red-300'
-                        : 'text-zinc-600';
-                    const lines = part.value.split('\n');
-                    if (lines[lines.length - 1] === '') lines.pop();
-                    return lines.map((line, li) => (
-                      <div key={`${i}-${li}`} className={`px-2 ${cls}`}>
-                        {prefix}
-                        {line}
-                      </div>
-                    ));
-                  }
-                )}
-              </pre>
-            </div>
-          ) : block.name === 'Write' && block.input?.content != null ? (
-            <div>
-              <div className="text-zinc-500 font-medium mb-1">Content</div>
-              <pre className="text-xs font-mono overflow-auto max-h-96 rounded bg-zinc-950/50">
-                {(block.input.content ?? '').split('\n').map((line, i) => (
-                  <div key={i} className="px-2 bg-green-950/60 text-green-300">
-                    +{line}
-                  </div>
-                ))}
-              </pre>
-            </div>
+          {isEditWithDiff ? (
+            <EditDiffView
+              oldString={resolvedBlock.input?.old_string ?? null}
+              newString={resolvedBlock.input?.new_string ?? null}
+              cursorDiff={cursorNativeDiff}
+            />
+          ) : isWriteWithContent ? (
+            <EditDiffView
+              oldString={resolvedBlock.input?.content != null ? '' : null}
+              newString={resolvedBlock.input?.content ?? null}
+              cursorDiff={cursorNativeDiff}
+              label="Content"
+            />
           ) : (
             <div>
               <div className="text-zinc-500 font-medium mb-1">Input</div>
               <pre className="text-zinc-400 whitespace-pre-wrap overflow-auto max-h-64 bg-zinc-950/50 rounded p-2">
-                {JSON.stringify(block.input, null, 2)}
+                {JSON.stringify(resolvedBlock.input, null, 2)}
               </pre>
             </div>
           )}
-          {block.result != null && (
+          {resolvedBlock.result != null && !cursorNativeDiff && (
             <div>
               <div
-                className={`font-medium mb-1 ${isContinuePlanning ? 'text-sky-400' : block.isError ? 'text-red-400' : 'text-zinc-500'}`}
+                className={`font-medium mb-1 ${isContinuePlanning ? 'text-sky-400' : resolvedBlock.isError ? 'text-red-400' : 'text-zinc-500'}`}
               >
-                {isContinuePlanning ? 'Feedback' : block.isError ? 'Error' : 'Result'}
+                {isContinuePlanning ? 'Feedback' : resolvedBlock.isError ? 'Error' : 'Result'}
               </div>
               {bashResultHtml != null ? (
                 <pre
                   className={`whitespace-pre-wrap overflow-auto max-h-80 rounded p-2 ${
-                    block.isError && !isContinuePlanning
+                    resolvedBlock.isError && !isContinuePlanning
                       ? 'text-red-300 bg-red-950/30'
                       : 'text-zinc-300 bg-zinc-950/50'
                   }`}
@@ -838,12 +588,14 @@ export default function ToolUseBlock({ block, worktreePath, sessionId }) {
               ) : (
                 <pre
                   className={`whitespace-pre-wrap overflow-auto max-h-80 rounded p-2 ${
-                    block.isError && !isContinuePlanning
+                    resolvedBlock.isError && !isContinuePlanning
                       ? 'text-red-300 bg-red-950/30'
                       : 'text-zinc-400 bg-zinc-950/50'
                   }`}
                 >
-                  {block.result}
+                  {typeof resolvedBlock.result === 'string'
+                    ? resolvedBlock.result
+                    : JSON.stringify(resolvedBlock.result, null, 2)}
                 </pre>
               )}
             </div>

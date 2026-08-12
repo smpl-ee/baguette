@@ -108,16 +108,23 @@ export default function SessionCard({ session }) {
           {!isArchived && <ArchiveSession session={session} />}
         </div>
       </div>
-      <div className="text-xs text-zinc-400 mt-1 mb-1.5 sm:mb-2 ml-5">
+      <div className="text-xs text-zinc-400 mt-1 mb-1.5 sm:mb-2 ml-5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
         {session.agent_type === 'reviewer' && session.pr_number ? (
-          <span> · PR #{session.pr_number}</span>
+          <span>PR #{session.pr_number}</span>
         ) : (
           <>
             {session.base_branch && <span>{session.base_branch}</span>}
             {session.created_branch && (
-              <span className="text-zinc-600"> → {session.created_branch}</span>
+              <span className="text-zinc-600">→ {session.created_branch}</span>
             )}
           </>
+        )}
+        {(session.agent_sdk || session.model) && (
+          <span className="text-zinc-700 flex items-center gap-1">
+            <span>·</span>
+            <span>{session.agent_sdk === 'cursor' ? 'Cursor' : 'Claude'}</span>
+            {session.model && <span>{session.model}</span>}
+          </span>
         )}
       </div>
       <p className="text-xs text-zinc-500 line-clamp-2 ml-5">{session.initial_prompt}</p>
