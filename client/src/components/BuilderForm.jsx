@@ -9,6 +9,7 @@ import { usePersistentState } from '../hooks/usePersistentState.js';
 import FileAttachmentPicker from './FileAttachmentPicker.jsx';
 import SearchableSelect from './SearchableSelect.jsx';
 import { isMobile } from '../utils/isMobile.js';
+import { variantLabel } from '../utils/models.js';
 
 function parseRepoFullName(full) {
   if (!full) return { owner: '', name: '' };
@@ -330,7 +331,7 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
                   >
                     {variants.map((v, i) => (
                       <option key={i} value={i}>
-                        {v.params?.map((p) => `${p.id}=${p.value}`).join(', ') || v.display_name}
+                        {variantLabel(v, selectedModel?.display_name)}
                         {v.is_default ? ' (default)' : ''}
                       </option>
                     ))}

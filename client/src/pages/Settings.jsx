@@ -8,6 +8,7 @@ import { requestNotificationPermission } from '../utils/notifications.js';
 import { useRepoContext } from '../context/RepoContext.jsx';
 import SearchableSelect from '../components/SearchableSelect.jsx';
 import { repoDisplayName, isLocalRepo } from '../utils/repoDisplayName.js';
+import { variantLabel } from '../utils/models.js';
 
 // ─── RepoSearchInput ──────────────────────────────────────────────────────────
 
@@ -1183,7 +1184,7 @@ function AgentTab({ settings, onSave }) {
               >
                 {variants.map((v, i) => (
                   <option key={i} value={i}>
-                    {v.params?.map((p) => `${p.id}=${p.value}`).join(', ') || v.display_name}
+                    {variantLabel(v, m?.display_name)}
                     {v.is_default ? ' (default)' : ''}
                   </option>
                 ))}

@@ -6,15 +6,7 @@ import PrStatusBadge from './PrStatusBadge.jsx';
 import { useSessionsContext } from '../context/SessionsContext.jsx';
 import { formatRelativeTime } from '../utils/dates.js';
 import ArchiveSession from './ArchiveSession.jsx';
-
-function parseModelField(model) {
-  if (!model) return null;
-  try {
-    const parsed = JSON.parse(model);
-    if (parsed?.id) return parsed.id;
-  } catch {}
-  return model;
-}
+import { parseModelField } from '../utils/models.js';
 
 function StatusIcon({ status }) {
   switch (status) {
@@ -131,7 +123,8 @@ export default function SessionCard({ session }) {
         {session.model && (
           <span className="text-zinc-700 flex items-center gap-1">
             <span>·</span>
-            <span>{parseModelField(session.model)}</span>
+            <span>{session.agent_sdk === 'cursor' ? 'Cursor' : 'Claude'}</span>
+            {session.model && <span>{parseModelField(session.model)}</span>}
           </span>
         )}
       </div>

@@ -255,9 +255,10 @@ export class SessionsService extends KnexService {
     const user = await this.app.service('users').get(session.user_id, {});
     const token = getEffectiveGithubToken(user);
     if (!token) throw new BadRequest('No GitHub token configured');
+    const force = !!data?.force;
     let pushedBranch;
     try {
-      const result = await gitPush(cwd, token);
+      const result = await gitPush(cwd, token, { force });
       pushedBranch = result.branch;
       await this.app
         .service('sessions')

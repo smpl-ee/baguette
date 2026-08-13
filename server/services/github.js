@@ -470,13 +470,12 @@ export async function gitPush(worktreePath, token, { force = false } = {}) {
   } catch (pushErr) {
     const stderr = pushErr.stderr?.toString() ?? '';
     if (stderr.includes('[rejected]') || stderr.includes('Updates were rejected')) {
-      const err = new Error(
-        force
-          ? 'Force push rejected: the remote ref has been updated since your last fetch. ' +
-            'Call GitFetch to update your tracking refs, then try GitPush with force again.'
-          : 'Push rejected: the remote has changes not present locally. ' +
-            'Call GitPull to pull the latest changes, resolve any conflicts, then call GitPush again.'
-      );
+      const guidance = force
+        ? 'Force push rejected: the remote ref has been updated since your last fetch. ' +
+          'Call GitFetch to update your tracking refs, then try GitPush with force again.'
+        : 'Push rejected: the remote has changes not present locally. ' +
+          'Call GitPull to pull the latest changes, resolve any conflicts, then call GitPush again.';
+      const err = new Error(`${guidance}\n\nOriginal error:\n${stderr.trim()}`);
       err.rejected = true;
       throw err;
     }

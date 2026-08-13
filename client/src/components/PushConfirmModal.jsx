@@ -1,6 +1,9 @@
+import { useState } from 'react';
 import { X, Upload, Pencil } from 'lucide-react';
 
 export default function PushConfirmModal({ commitsToPush, onConfirm, onCancel, onEditDetails }) {
+  const [force, setForce] = useState(false);
+
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
       <div className="bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl w-full max-w-sm p-6">
@@ -20,9 +23,19 @@ export default function PushConfirmModal({ commitsToPush, onConfirm, onCancel, o
           )}{' '}
           to GitHub and create/update the PR.
         </p>
-        <p className="text-zinc-500 text-xs mb-6">
+        <p className="text-zinc-500 text-xs mb-4">
           Would you like to review the PR title and description before pushing?
         </p>
+
+        <label className="flex items-center gap-2 mb-6 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={force}
+            onChange={(e) => setForce(e.target.checked)}
+            className="w-3.5 h-3.5 rounded accent-amber-500"
+          />
+          <span className="text-xs text-zinc-400">Force push <span className="text-zinc-600">(--force-with-lease)</span></span>
+        </label>
 
         <div className="flex flex-col gap-2">
           <button
@@ -40,11 +53,11 @@ export default function PushConfirmModal({ commitsToPush, onConfirm, onCancel, o
               Cancel
             </button>
             <button
-              onClick={onConfirm}
+              onClick={() => onConfirm(force)}
               className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 text-sm bg-amber-600 hover:bg-amber-500 text-white font-medium rounded-lg transition-colors"
             >
               <Upload className="w-3.5 h-3.5" />
-              Push
+              {force ? 'Force Push' : 'Push'}
             </button>
           </div>
         </div>

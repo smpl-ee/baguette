@@ -10,7 +10,6 @@ import {
   ChevronRight,
   ChevronDown,
   Terminal,
-  Upload,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { messagesService, sessionsService } from '../../feathers.js';
@@ -22,7 +21,6 @@ import { isMobile } from '../../utils/isMobile.js';
 import { usePersistentState } from '../../hooks/usePersistentState.js';
 import ApprovalInline from '../../components/ApprovalInline.jsx';
 import MergeConfirmModal from '../../components/MergeConfirmModal.jsx';
-import PushConfirmModal from '../../components/PushConfirmModal.jsx';
 import Tooltip from '../../components/Tooltip.jsx';
 
 /** "Check comments" quick message for builder sessions — must stay aligned with `## Responding to PR feedback` in `server/prompts/build-prompt.md` (injected via session prompt; do not duplicate that section here). */
@@ -80,9 +78,6 @@ export default function ChatView({
   onModeChange,
   onViewChange,
   readonly,
-  hasUncommitted,
-  commitsToPush,
-  onCommitsPushed,
 }) {
   const persistentState = usePersistentState(
     session?.id ? `session-chat-${session.id}` : undefined
@@ -96,8 +91,6 @@ export default function ChatView({
   const [showMergeModal, setShowMergeModal] = useState(false);
   const [merging, setMerging] = useState(false);
   const [mergeError, setMergeError] = useState(null);
-  const [pushing, setPushing] = useState(false);
-  const [showPushModal, setShowPushModal] = useState(false);
   const [restoring, setRestoring] = useState(false);
 
   const isRunning = session?.status === 'running';
@@ -137,30 +130,6 @@ export default function ChatView({
       type: 'user',
       message_json: JSON.stringify({ type: 'user', message: { role: 'user', content: text } }),
     });
-  };
-
-  const handlePushConfirmed = async () => {
-    if (!session?.id || pushing) return;
-    setShowPushModal(false);
-    setPushing(true);
-    try {
-      await sessionsService.push(session.id);
-      onCommitsPushed?.();
-      toast.success('Pushed successfully');
-    } catch (err) {
-      if (err.data?.conflict) {
-        toastError('Push failed — use Git Sync to resolve conflicts first', err);
-      } else {
-        toastError('Push failed', err);
-      }
-    } finally {
-      setPushing(false);
-    }
-  };
-
-  const handlePush = () => {
-    if (!session?.id || pushing) return;
-    setShowPushModal(true);
   };
 
   const handleRestore = async () => {
@@ -371,26 +340,6 @@ export default function ChatView({
               </Tooltip>
             </div>
           )}
-          {!readonly && session?.status === 'completed' && session?.pr_status !== 'merged' && (commitsToPush > 0 || hasUncommitted) && (
-            <div className="flex gap-2 flex-wrap items-center py-2">
-              <Tooltip content="Push commits to GitHub and create/update the PR">
-                <button
-                  type="button"
-                  onClick={handlePush}
-                  disabled={pushing}
-                  className="relative flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 border border-amber-500 rounded-lg text-xs text-white transition-colors"
-                >
-                  <Upload className="w-3.5 h-3.5" />
-                  Push
-                  {commitsToPush > 0 && (
-                    <span className="ml-0.5 flex items-center justify-center min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-white text-amber-700 text-[10px] font-bold leading-none">
-                      {commitsToPush}
-                    </span>
-                  )}
-                </button>
-              </Tooltip>
-            </div>
-          )}
           {!readonly &&
             session?.status === 'completed' &&
             session?.pr_status !== 'merged' && (
@@ -526,17 +475,6 @@ export default function ChatView({
           </form>
         )}
       </div>
-      {showPushModal && (
-        <PushConfirmModal
-          commitsToPush={commitsToPush}
-          onConfirm={handlePushConfirmed}
-          onCancel={() => setShowPushModal(false)}
-          onEditDetails={() => {
-            setShowPushModal(false);
-            onViewChange?.('edit');
-          }}
-        />
-      )}
       {showMergeModal && (
         <MergeConfirmModal
           prNumber={session?.pr_number}

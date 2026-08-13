@@ -15,6 +15,7 @@ import {
   Archive,
   PanelLeft,
   Pencil,
+  Upload,
 } from 'lucide-react';
 import { useSessionsContext } from '../context/SessionsContext.jsx';
 import { useFilters } from '../context/FilterContext.jsx';
@@ -30,35 +31,13 @@ import { useGetTasks } from '../hooks/useGetTasks.js';
 import TaskPanel from '../components/TaskPanel.jsx';
 import TaskLogModal from '../components/TaskLogModal.jsx';
 import ArchiveSession from '../components/ArchiveSession.jsx';
+import PushConfirmModal from '../components/PushConfirmModal.jsx';
 import ChatView from './session/ChatView.jsx';
 import DiffView from './session/DiffView.jsx';
 import LogsView from './session/LogsView.jsx';
 import EditView from './session/EditView.jsx';
 import PrStatusBadge from '../components/PrStatusBadge.jsx';
-
-function parseModelField(model) {
-  if (!model) return null;
-  try {
-    const parsed = JSON.parse(model);
-    if (parsed?.id) return parsed.id;
-  } catch {}
-  return model;
-}
-
-function buildModelOptions(models, agentSdk) {
-  return models.flatMap((m) => {
-    if (agentSdk === 'cursor' && m.variants?.length) {
-      return m.variants.map((v) => ({
-        value: JSON.stringify({ id: m.id, params: v.params }),
-        label:
-          v.display_name ||
-          v.params?.map((p) => `${p.id}=${p.value}`).join(', ') ||
-          m.display_name,
-      }));
-    }
-    return [{ value: m.id, label: m.display_name }];
-  });
-}
+import { parseModelField, parseModelFieldFull, variantLabel } from '../utils/models.js';
 
 /**
  * Processes a flat list of messages from session history:
@@ -297,11 +276,14 @@ export default function Session() {
   const [showTasks, setShowTasks] = useState(false);
   const [showSidebar, setShowSidebar] = useState(null);
   const [diffFiles, setDiffFiles] = useState([]);
-  const [hasDiff, setHasDiff] = useState(null);
+  const [_hasDiff, setHasDiff] = useState(null);
   const [hasUncommitted, setHasUncommitted] = useState(null);
   const [commitsToPush, setCommitsToPush] = useState(0);
   const [showMenu, setShowMenu] = useState(false);
+  const [menuModelOverride, setMenuModelOverride] = useState(null);
   const [models, setModels] = useState([]);
+  const [pushing, setPushing] = useState(false);
+  const [showPushModal, setShowPushModal] = useState(false);
   const [activeTaskModal, setActiveTaskModal] = useState(null);
   const [configCommands, setConfigCommands] = useState([]);
   const [error, setError] = useState(null);
@@ -363,7 +345,7 @@ export default function Session() {
     apiFetch(url)
       .then((d) => setModels(d.models || []))
       .catch(() => {});
-  }, [session?.agent_sdk]);
+  }, [session?.agent_sdk]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!sessionId) return;
     sessionsService
@@ -411,7 +393,10 @@ export default function Session() {
   }, [selectedRepo, navigate]);
 
   useEffect(() => {
-    if (!showMenu) return;
+    if (!showMenu) {
+      setMenuModelOverride(null);
+      return;
+    }
     const handleClick = (e) => {
       if (menuRef.current && !menuRef.current.contains(e.target)) {
         setShowMenu(false);
@@ -483,6 +468,30 @@ export default function Session() {
 
   const handleViewTaskLogs = (taskId) => {
     setActiveTaskModal(taskId);
+  };
+
+  const handlePush = () => {
+    if (!session?.id || pushing) return;
+    setShowPushModal(true);
+  };
+
+  const handlePushConfirmed = async (force) => {
+    if (!session?.id || pushing) return;
+    setShowPushModal(false);
+    setPushing(true);
+    try {
+      await sessionsService.push(session.id, { force });
+      setCommitsToPush(0);
+      toast.success('Pushed successfully');
+    } catch (err) {
+      if (err.data?.conflict) {
+        toastError('Push failed — use Git Sync to resolve conflicts first', err);
+      } else {
+        toastError('Push failed', err);
+      }
+    } finally {
+      setPushing(false);
+    }
   };
 
   const handleStop = async () => {
@@ -575,7 +584,10 @@ export default function Session() {
                 {session.model && (
                   <span className="hidden sm:inline-flex items-center gap-1 shrink-0 text-xs text-zinc-600">
                     <span className="text-zinc-700">·</span>
-                    <span className="text-zinc-700">{parseModelField(session.model)}</span>
+                    {session.agent_sdk === 'cursor' ? 'Cursor' : 'Claude'}
+                    {session.model && (
+                      <span className="text-zinc-700">{parseModelField(session.model)}</span>
+                    )}
                   </span>
                 )}
               </div>
@@ -670,31 +682,81 @@ export default function Session() {
 
                 {showMenu && (
                   <div className="absolute right-0 top-full mt-1 w-56 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl overflow-hidden z-50">
-                    <div className="p-2 border-b border-zinc-800">
-                      <div className="text-[11px] text-zinc-500 px-2 py-1">Model</div>
-                      <select
-                        value={session.model || ''}
-                        onChange={(e) => {
-                          handleModelChange(e.target.value);
-                          setShowMenu(false);
-                        }}
-                        className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-300 focus:outline-none mb-1"
-                      >
-                        {buildModelOptions(models, session.agent_sdk).map((opt) => (
-                          <option key={opt.value} value={opt.value}>
-                            {opt.label}
-                          </option>
-                        ))}
-                        {session.model &&
-                          !buildModelOptions(models, session.agent_sdk).some(
-                            (o) => o.value === session.model
-                          ) && (
-                            <option value={session.model}>
-                              {parseModelField(session.model)}
-                            </option>
+                    {session.agent_sdk && (
+                      <div className="p-2 border-b border-zinc-800 sm:hidden">
+                        <div className="text-[11px] text-zinc-500 px-2 py-1">Agent</div>
+                        <div className="px-2 py-1 text-xs text-zinc-400">
+                          {session.agent_sdk === 'cursor' ? 'Cursor' : 'Claude'}
+                        </div>
+                      </div>
+                    )}
+                    {(() => {
+                      const isCursor = session.agent_sdk === 'cursor';
+                      const { id: sessionModelId, params: sessionParams } = parseModelFieldFull(session.model);
+                      const menuModelId = menuModelOverride ?? sessionModelId;
+                      const menuModelObj = models.find((m) => m.id === menuModelId);
+                      const variants = menuModelObj?.variants ?? [];
+                      const currentVariantIdx = (() => {
+                        if (!variants.length || !sessionParams) return 0;
+                        const idx = variants.findIndex((v) =>
+                          v.params?.every((p) =>
+                            sessionParams.some((sp) => sp.id === p.id && sp.value === p.value)
+                          )
+                        );
+                        return idx >= 0 ? idx : 0;
+                      })();
+                      return (
+                        <div className="p-2 border-b border-zinc-800">
+                          <div className="text-[11px] text-zinc-500 px-2 py-1">Model</div>
+                          <select
+                            value={menuModelId || ''}
+                            onChange={(e) => {
+                              const newId = e.target.value;
+                              const newModelObj = models.find((m) => m.id === newId);
+                              if (isCursor && newModelObj?.variants?.length) {
+                                setMenuModelOverride(newId);
+                              } else {
+                                handleModelChange(newId);
+                                setShowMenu(false);
+                              }
+                            }}
+                            className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-300 focus:outline-none mb-1"
+                          >
+                            {models.map((m) => (
+                              <option key={m.id} value={m.id}>
+                                {m.display_name}
+                              </option>
+                            ))}
+                            {menuModelId && !models.some((m) => m.id === menuModelId) && (
+                              <option value={menuModelId}>{menuModelId}</option>
+                            )}
+                          </select>
+                          {isCursor && variants.length > 0 && (
+                            <>
+                              <div className="text-[11px] text-zinc-500 px-2 py-1 mt-1">Variant</div>
+                              <select
+                                value={currentVariantIdx}
+                                onChange={(e) => {
+                                  const v = variants[parseInt(e.target.value)];
+                                  handleModelChange(
+                                    JSON.stringify({ id: menuModelId, params: v.params })
+                                  );
+                                  setShowMenu(false);
+                                }}
+                                className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-300 focus:outline-none mb-1"
+                              >
+                                {variants.map((v, i) => (
+                                  <option key={i} value={i}>
+                                    {variantLabel(v, menuModelObj.display_name)}
+                                    {v.is_default ? ' (default)' : ''}
+                                  </option>
+                                ))}
+                              </select>
+                            </>
                           )}
-                      </select>
-                    </div>
+                        </div>
+                      );
+                    })()}
                     <div className="p-2 border-b border-zinc-800 sm:hidden">
                       <div className="text-[11px] text-zinc-500 px-2 py-1">Permission Mode</div>
                       {[
@@ -862,7 +924,23 @@ export default function Session() {
             ))}
             </div>
             {!isReadonly && session?.pr_status !== 'merged' && (
-              <div className="ml-auto shrink-0 flex items-center gap-1.5 py-2 pl-2">
+              <div className="ml-auto shrink-0 flex items-center gap-2 py-2 pl-2">
+                {(commitsToPush > 0 || hasUncommitted) && session?.status === 'completed' && (
+                  <button
+                    type="button"
+                    onClick={handlePush}
+                    disabled={pushing}
+                    className="relative flex items-center gap-1 px-2 py-1 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 border border-amber-500 rounded text-xs text-white transition-colors"
+                  >
+                    <Upload className="w-3 h-3" />
+                    Push
+                    {commitsToPush > 0 && (
+                      <span className="flex items-center justify-center min-w-[1rem] h-4 px-1 rounded-full bg-white text-amber-700 text-[10px] font-bold leading-none">
+                        {commitsToPush}
+                      </span>
+                    )}
+                  </button>
+                )}
                 <span className="text-xs text-zinc-500">Auto-push</span>
                 <button
                   type="button"
@@ -900,10 +978,7 @@ export default function Session() {
                 onModeChange={setPermissionMode}
                 onViewChange={setView}
                 readonly={isReadonly}
-                hasDiff={hasDiff}
-                hasUncommitted={hasUncommitted}
-                commitsToPush={commitsToPush}
-                onCommitsPushed={() => setCommitsToPush(0)}
+
               />
             )}
             {activeView === 'diff' && <DiffView session={session} onFilesChange={setDiffFiles} />}
@@ -988,6 +1063,17 @@ export default function Session() {
       </div>
 
       {/* Task Log Modal */}
+      {showPushModal && (
+        <PushConfirmModal
+          commitsToPush={commitsToPush}
+          onConfirm={handlePushConfirmed}
+          onCancel={() => setShowPushModal(false)}
+          onEditDetails={() => {
+            setShowPushModal(false);
+            setView('edit');
+          }}
+        />
+      )}
       {activeTaskModal != null && (
         <TaskLogModal
           task={tasks.find((t) => t.id === activeTaskModal)}

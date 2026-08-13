@@ -96,7 +96,18 @@ function buildBaguetteToolList(session, app) {
 
   const withSessionHeader = (body, session) => {
     const sessionId = session?.short_id || session?.id;
-    return `*Posted by Claude/Baguette for session ${sessionId}*\n\n${body}`;
+    const agentName = session?.agent_sdk === 'cursor' ? 'Cursor' : 'Claude';
+    const modelId = (() => {
+      const m = session?.model;
+      if (!m) return null;
+      try {
+        const parsed = JSON.parse(m);
+        if (parsed?.id) return parsed.id;
+      } catch { /* not JSON */ }
+      return m;
+    })();
+    const agentInfo = modelId ? `${agentName} ${modelId}` : agentName;
+    return `*Posted by baguette - ${agentInfo}, session ${sessionId}:*\n\n${body}`;
   };
 
   const getRepo = async () => {
