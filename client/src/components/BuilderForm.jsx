@@ -67,6 +67,8 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
   }, [repoFullName, selectedRepo?.default_branch, branches]);
 
   const cursorDefaultModelRef = useRef('');
+  const claudeDefaultModelRef = useRef('');
+  const modelExplicitlySet = useRef(false);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -80,11 +82,12 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
           setAgentSdk((prev) => (prev === 'claude' ? d.default_agent_sdk : prev));
         }
         if (d?.model) {
-          setModel((prev) => prev || d.model);
+          claudeDefaultModelRef.current = d.model;
+          if (!modelExplicitlySet.current && !isCursor) setModel(d.model);
         }
         if (d?.cursor_model) {
           cursorDefaultModelRef.current = d.cursor_model;
-          setModel((prev) => (isCursor && !prev ? d.cursor_model : prev));
+          if (!modelExplicitlySet.current && isCursor) setModel(d.cursor_model);
         }
       })
       .catch(() => {});
@@ -94,9 +97,19 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
   useEffect(() => {
     const url = isCursor ? '/api/settings/models?sdk=cursor' : '/api/settings/models';
     setModels([]);
-    setModel(isCursor && cursorDefaultModelRef.current ? cursorDefaultModelRef.current : '');
+    modelExplicitlySet.current = false;
     apiFetch(url)
-      .then((d) => setModels(d.models || []))
+      .then((d) => {
+        const loadedModels = d.models || [];
+        setModels(loadedModels);
+        setModel((prev) => {
+          if (modelExplicitlySet.current) return prev;
+          if (prev && loadedModels.some((m) => m.id === prev)) return prev;
+          const pref = isCursor ? cursorDefaultModelRef.current : claudeDefaultModelRef.current;
+          if (pref && loadedModels.some((m) => m.id === pref)) return pref;
+          return loadedModels[0]?.id || '';
+        });
+      })
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentSdk]);
@@ -307,7 +320,7 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
               <label className="block text-sm font-medium text-zinc-300 mb-1">Model</label>
               <select
                 value={model}
-                onChange={(e) => setModel(e.target.value)}
+                onChange={(e) => { setModel(e.target.value); modelExplicitlySet.current = true; }}
                 className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
               >
                 {models.length === 0 && <option value="">Loading…</option>}
