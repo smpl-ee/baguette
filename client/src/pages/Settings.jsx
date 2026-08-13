@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { toastError } from '../utils/toastError.jsx';
 import { apiFetch } from '../api.js';
@@ -820,6 +820,8 @@ function AgentTab({ settings, onSave }) {
   const [cursorModels, setCursorModels] = useState([]);
   const [model, setModel] = useState('');
   const [cursorModel, setCursorModel] = useState('');
+  const [cursorVariantIdx, setCursorVariantIdx] = useState(null);
+  const savedCursorParamsRef = useRef(null);
   const [defaultAgentSdk, setDefaultAgentSdk] = useState('claude');
   const [permissionMode, setPermissionMode] = useState('default');
   const [anthropicApiKey, setAnthropicApiKey] = useState(null);
@@ -871,7 +873,20 @@ function AgentTab({ settings, onSave }) {
   useEffect(() => {
     if (!settings) return;
     setModel(settings.model || '');
-    setCursorModel(settings.cursor_model || '');
+    const rawCursorModel = settings.cursor_model || '';
+    try {
+      const parsed = JSON.parse(rawCursorModel);
+      if (parsed?.id) {
+        setCursorModel(parsed.id);
+        savedCursorParamsRef.current = parsed.params ?? null;
+      } else {
+        setCursorModel(rawCursorModel);
+        savedCursorParamsRef.current = null;
+      }
+    } catch {
+      setCursorModel(rawCursorModel);
+      savedCursorParamsRef.current = null;
+    }
     setDefaultAgentSdk(settings.default_agent_sdk || 'claude');
     const mode = settings.default_permission_mode || 'default';
     setPermissionMode(mode === 'plan' ? 'default' : mode);
@@ -883,6 +898,24 @@ function AgentTab({ settings, onSave }) {
     setCursorApiKeyDirty(false);
   }, [settings]);
 
+  useEffect(() => {
+    const m = cursorModels.find((m) => m.id === cursorModel);
+    const variants = m?.variants ?? [];
+    if (!variants.length) { setCursorVariantIdx(null); return; }
+    if (savedCursorParamsRef.current) {
+      const saved = savedCursorParamsRef.current;
+      const matchIdx = variants.findIndex(
+        (v) =>
+          v.params?.length === saved.length &&
+          v.params.every((p, i) => p.id === saved[i]?.id && p.value === saved[i]?.value)
+      );
+      savedCursorParamsRef.current = null;
+      if (matchIdx >= 0) { setCursorVariantIdx(matchIdx); return; }
+    }
+    const defaultIdx = variants.findIndex((v) => v.is_default);
+    setCursorVariantIdx(defaultIdx >= 0 ? defaultIdx : 0);
+  }, [cursorModel, cursorModels]);
+
   const systemAllowedCommands = settings?.system_allowed_commands || [];
 
   const handleSave = async (e) => {
@@ -891,9 +924,18 @@ function AgentTab({ settings, onSave }) {
     setSaved(false);
     setError(null);
     try {
+      const selectedCursorVariant = (() => {
+        if (!cursorModel || cursorVariantIdx == null) return null;
+        const m = cursorModels.find((m) => m.id === cursorModel);
+        const variants = m?.variants ?? [];
+        return variants[cursorVariantIdx] ?? null;
+      })();
       const patch = {
         model,
-        cursor_model: cursorModel,
+        cursor_model:
+          cursorModel && selectedCursorVariant?.params?.length
+            ? JSON.stringify({ id: cursorModel, params: selectedCursorVariant.params })
+            : cursorModel,
         default_agent_sdk: defaultAgentSdk,
         default_permission_mode: permissionMode,
         branch_prefix: branchPrefix,
@@ -1109,7 +1151,10 @@ function AgentTab({ settings, onSave }) {
           </div>
           <select
             value={cursorModel}
-            onChange={(e) => setCursorModel(e.target.value)}
+            onChange={(e) => {
+              savedCursorParamsRef.current = null;
+              setCursorModel(e.target.value);
+            }}
             className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
           >
             <option value="">System default</option>
@@ -1123,6 +1168,29 @@ function AgentTab({ settings, onSave }) {
             ))}
           </select>
         </div>
+        {(() => {
+          const m = cursorModels.find((m) => m.id === cursorModel);
+          const variants = m?.variants ?? [];
+          return variants.length > 0 ? (
+            <div>
+              <label className="block text-sm font-medium text-zinc-300 mb-1">
+                Default variant
+              </label>
+              <select
+                value={cursorVariantIdx ?? 0}
+                onChange={(e) => setCursorVariantIdx(parseInt(e.target.value))}
+                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+              >
+                {variants.map((v, i) => (
+                  <option key={i} value={i}>
+                    {v.params?.map((p) => `${p.id}=${p.value}`).join(', ') || v.display_name}
+                    {v.is_default ? ' (default)' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null;
+        })()}
         <div>
           <label className="block text-sm font-medium text-zinc-300 mb-1">API Key</label>
           <MaskedSecretInput
