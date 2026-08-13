@@ -82,7 +82,7 @@ const DEFAULT_SESSION = {
   worktree_path: '/tmp/wt',
   auto_push: 1,
 };
-const SESSION_HEADER = '*Posted by Claude/Baguette for session test*\n\n';
+const SESSION_HEADER = '*Posted by baguette - Claude, session test:*\n\n';
 const INTERNAL_PATCH_PARAMS = { provider: undefined, user: { id: 1 } };
 
 /** Simulates a task that calls onLog/onExit callbacks asynchronously. */

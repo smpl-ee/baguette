@@ -179,7 +179,14 @@ function buildBaguetteToolList(session, app) {
             if (err.rejected) return fail(err.message);
             throw err;
           }
+          const freshSession = await getSession();
           await patchSession({ remote_branch: result.branch, created_branch: result.branch });
+          if (freshSession?.pr_status === 'merged') {
+            return ok({
+              ...result,
+              hint: 'The previous PR for this session has been merged. You should: 1) call GitPull to sync with the latest changes from the remote branch and merge the base branch — resolve any conflicts, commit, and push again if needed, then 2) call PrUpsert to open a new pull request for the current changes.',
+            });
+          }
           return ok(result);
         },
       },
