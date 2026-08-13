@@ -36,6 +36,30 @@ import LogsView from './session/LogsView.jsx';
 import EditView from './session/EditView.jsx';
 import PrStatusBadge from '../components/PrStatusBadge.jsx';
 
+function parseModelField(model) {
+  if (!model) return null;
+  try {
+    const parsed = JSON.parse(model);
+    if (parsed?.id) return parsed.id;
+  } catch {}
+  return model;
+}
+
+function buildModelOptions(models, agentSdk) {
+  return models.flatMap((m) => {
+    if (agentSdk === 'cursor' && m.variants?.length) {
+      return m.variants.map((v) => ({
+        value: JSON.stringify({ id: m.id, params: v.params }),
+        label:
+          v.display_name ||
+          v.params?.map((p) => `${p.id}=${p.value}`).join(', ') ||
+          m.display_name,
+      }));
+    }
+    return [{ value: m.id, label: m.display_name }];
+  });
+}
+
 /**
  * Processes a flat list of messages from session history:
  * - Collects tool results from user messages that consist only of tool_result blocks
@@ -331,10 +355,15 @@ export default function Session() {
   );
 
   useEffect(() => {
-    apiFetch('/api/settings/models')
+    if (!session) return;
+    const url =
+      session.agent_sdk === 'cursor'
+        ? '/api/settings/models?sdk=cursor'
+        : '/api/settings/models';
+    apiFetch(url)
       .then((d) => setModels(d.models || []))
       .catch(() => {});
-  }, []);
+  }, [session?.agent_sdk]);
   useEffect(() => {
     if (!sessionId) return;
     sessionsService
@@ -543,13 +572,10 @@ export default function Session() {
                     prUrl={prInfo.url}
                   />
                 )}
-                {(session.agent_sdk || session.model) && (
+                {session.model && (
                   <span className="hidden sm:inline-flex items-center gap-1 shrink-0 text-xs text-zinc-600">
                     <span className="text-zinc-700">·</span>
-                    {session.agent_sdk === 'cursor' ? 'Cursor' : 'Claude'}
-                    {session.model && (
-                      <span className="text-zinc-700">{session.model}</span>
-                    )}
+                    <span className="text-zinc-700">{parseModelField(session.model)}</span>
                   </span>
                 )}
               </div>
@@ -644,15 +670,6 @@ export default function Session() {
 
                 {showMenu && (
                   <div className="absolute right-0 top-full mt-1 w-56 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl overflow-hidden z-50">
-                    {(session.agent_sdk || session.model) && (
-                      <div className="p-2 border-b border-zinc-800 sm:hidden">
-                        <div className="text-[11px] text-zinc-500 px-2 py-1">Agent</div>
-                        <div className="px-2 py-1 text-xs text-zinc-400">
-                          {session.agent_sdk === 'cursor' ? 'Cursor' : 'Claude'}
-                          {session.model && <span className="ml-1.5 text-zinc-600">{session.model}</span>}
-                        </div>
-                      </div>
-                    )}
                     <div className="p-2 border-b border-zinc-800">
                       <div className="text-[11px] text-zinc-500 px-2 py-1">Model</div>
                       <select
@@ -663,14 +680,19 @@ export default function Session() {
                         }}
                         className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-300 focus:outline-none mb-1"
                       >
-                        {models.map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.display_name}
+                        {buildModelOptions(models, session.agent_sdk).map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
                           </option>
                         ))}
-                        {session.model && !models.some((m) => m.id === session.model) && (
-                          <option value={session.model}>{session.model}</option>
-                        )}
+                        {session.model &&
+                          !buildModelOptions(models, session.agent_sdk).some(
+                            (o) => o.value === session.model
+                          ) && (
+                            <option value={session.model}>
+                              {parseModelField(session.model)}
+                            </option>
+                          )}
                       </select>
                     </div>
                     <div className="p-2 border-b border-zinc-800 sm:hidden">
