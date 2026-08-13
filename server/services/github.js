@@ -452,14 +452,18 @@ export async function gitFetch(worktreePath, token, branch) {
  * Push the current HEAD to origin and return the branch name.
  * Throws with a `rejected` property if the push is rejected.
  */
-export async function gitPush(worktreePath, token) {
+export async function gitPush(worktreePath, token, { force = false } = {}) {
   const { stdout: branchOut } = await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
     cwd: worktreePath,
   });
   const branch = branchOut.trim();
 
+  const pushArgs = ['push', '--set-upstream'];
+  if (force) pushArgs.push('--force-with-lease');
+  pushArgs.push('origin', branch);
+
   try {
-    await gitWithToken(token, ['push', '--set-upstream', 'origin', branch], {
+    await gitWithToken(token, pushArgs, {
       cwd: worktreePath,
       stdio: 'pipe',
     });
@@ -467,8 +471,11 @@ export async function gitPush(worktreePath, token) {
     const stderr = pushErr.stderr?.toString() ?? '';
     if (stderr.includes('[rejected]') || stderr.includes('Updates were rejected')) {
       const err = new Error(
-        'Push rejected: the remote has changes not present locally. ' +
-          'Call GitPull to pull the latest changes, resolve any conflicts, then call GitPush again.'
+        force
+          ? 'Force push rejected: the remote ref has been updated since your last fetch. ' +
+            'Call GitFetch to update your tracking refs, then try GitPush with force again.'
+          : 'Push rejected: the remote has changes not present locally. ' +
+            'Call GitPull to pull the latest changes, resolve any conflicts, then call GitPush again.'
       );
       err.rejected = true;
       throw err;
@@ -968,7 +975,10 @@ export async function getPRWorkflowLogs(token, repoFullName, runId, { startByte,
  * Create or update a pull request via the GitHub API.
  * @returns {{ url: string, number: number }}
  */
-export async function upsertPR(token, { repoFullName, prNumber, title, body, head, baseBranch }) {
+export async function upsertPR(
+  token,
+  { repoFullName, prNumber, title, body, head, baseBranch, reopen = false }
+) {
   const headers = {
     Authorization: `Bearer ${token}`,
     'Content-Type': 'application/json',
@@ -977,10 +987,12 @@ export async function upsertPR(token, { repoFullName, prNumber, title, body, hea
   };
 
   if (prNumber) {
+    const patchBody = { title, body };
+    if (reopen) patchBody.state = 'open';
     const res = await fetch(`https://api.github.com/repos/${repoFullName}/pulls/${prNumber}`, {
       method: 'PATCH',
       headers,
-      body: JSON.stringify({ title, body }),
+      body: JSON.stringify(patchBody),
     });
     if (!res.ok) {
       const text = await res.text();

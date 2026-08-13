@@ -144,9 +144,15 @@ function buildBaguetteToolList(session, app) {
 
       {
         name: 'GitPush',
-        description: 'Push the current branch to origin and set upstream.',
-        schema: {},
-        handler: async () => {
+        description:
+          'Push the current branch to origin and set upstream. Use force: true to push with --force-with-lease when the remote history has diverged (e.g. after a rebase).',
+        schema: {
+          force: z
+            .boolean()
+            .optional()
+            .describe('Use --force-with-lease to force push (e.g. after a rebase)'),
+        },
+        handler: async ({ force = false } = {}) => {
           const localErr = await requireGitHubRepo();
           if (localErr) return localErr;
           if (!session.auto_push) {
@@ -157,7 +163,7 @@ function buildBaguetteToolList(session, app) {
           }
           let result;
           try {
-            result = await gitPush(absoluteWorktreePath, await getToken());
+            result = await gitPush(absoluteWorktreePath, await getToken(), { force });
           } catch (err) {
             if (err.rejected) return fail(err.message);
             throw err;
@@ -257,8 +263,20 @@ function buildBaguetteToolList(session, app) {
                 'Auto-push is disabled. The PR has not been created/updated on GitHub. The user can push manually or enable auto-push using the controls at the bottom of the chat.',
             });
           }
+
+          // Get fresh session to check current PR status (may have changed since tool list was built)
+          const freshSession = await getSession();
+          const currentPrStatus = freshSession?.pr_status;
+
+          // Merged PRs cannot be reopened via GitHub API — treat as no PR and create a new one
+          let effectivePrNumber = session.pr_number;
+          if (effectivePrNumber && currentPrStatus === 'merged') {
+            await patchSession({ pr_number: null, pr_url: null, pr_status: null });
+            effectivePrNumber = null;
+          }
+
           let head = null;
-          if (!session.pr_number) {
+          if (!effectivePrNumber) {
             const { stdout } = await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
               cwd: absoluteWorktreePath,
             });
@@ -283,21 +301,27 @@ function buildBaguetteToolList(session, app) {
               );
             }
           }
-          // Re-read session since we may have patched it above
+
+          // Reopen if the PR was closed (but not merged — merged was handled above)
+          const reopen = Boolean(effectivePrNumber && currentPrStatus === 'closed');
+
           const pr = await upsertPR(await getToken(), {
             repoFullName: session.repo_full_name,
-            prNumber: session.pr_number,
+            prNumber: effectivePrNumber,
             title,
             body: description,
             head,
             baseBranch: session.base_branch,
+            reopen,
           });
-          if (!session.pr_number) {
+          if (!effectivePrNumber) {
             await patchSession({
               pr_url: pr.url,
               pr_number: pr.number,
               pr_status: 'draft',
             });
+          } else if (reopen) {
+            await patchSession({ pr_status: 'open' });
           }
           return ok({ url: pr.url, number: pr.number });
         },
