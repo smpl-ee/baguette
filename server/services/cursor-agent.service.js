@@ -397,7 +397,7 @@ ${systemPrompt}`;
     return this.getActiveSession(id);
   }
 
-  async generateSessionMetadata(initialPrompt, shortId = '', user, _repoFullName = null) {
+  async generateSessionMetadata(initialPrompt, shortId = '', user, repo = null) {
     const fallbackBranch = `task-${shortId}`;
     const prompt = `Generate metadata for a coding task. Output ONLY a JSON object with no markdown or explanation:
 - "label": very short label (max 50 chars) summarizing the task
@@ -409,7 +409,18 @@ Task: ${initialPrompt}`;
     let branchName = fallbackBranch;
 
     const fullUser = user?.id ? await this.app.service('users').get(user.id, {}) : null;
-    const apiKey = fullUser?.cursor_api_key || undefined;
+
+    let repoApiKey = null;
+    if (repo?.id && user?.id) {
+      const userRepos = await this.app.service('user-repos').find({
+        query: { repo_id: repo.id },
+        user: { id: user.id },
+        paginate: false,
+      });
+      repoApiKey = userRepos?.[0]?.cursor_api_key || null;
+    }
+
+    const apiKey = repoApiKey || fullUser?.cursor_api_key || undefined;
     const agent = await Agent.create({
       apiKey,
       model: { id: CURSOR_CHEAP_MODEL_ID },

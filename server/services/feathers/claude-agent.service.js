@@ -620,7 +620,7 @@ export class ClaudeAgentService {
     await this._disposeActiveSession(sessionId);
   }
 
-  async generateSessionMetadata(initialPrompt, shortId = '', user, repoFullName = null) {
+  async generateSessionMetadata(initialPrompt, shortId = '', user, repo = null) {
     const fallbackBranch = `task-${shortId}`;
     const prompt = `Generate metadata for a coding task. Output ONLY a JSON object with no markdown or explanation:
 - "label": very short label (max 50 chars) summarizing the task
@@ -631,7 +631,7 @@ Task: ${initialPrompt}`;
     let label = '';
     let branchName = fallbackBranch;
 
-    const env = await getClaudeEnv(this.app, user.id, repoFullName);
+    const env = await getClaudeEnv(this.app, user.id, repo?.full_name ?? null);
     for await (const message of query({
       prompt,
       options: { model: 'haiku', env },

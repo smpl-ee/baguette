@@ -553,7 +553,7 @@ async function prepareSessionEnvironment(context) {
         context.data.agent_sdk === 'cursor' ? 'cursor-agent' : 'claude-agent';
       const result = await context.app
         .service(agentService)
-        .generateSessionMetadata(context.data.initial_prompt || '', shortId, context.params.user, repo.full_name);
+        .generateSessionMetadata(context.data.initial_prompt || '', shortId, context.params.user, repo);
       if (result.label) context.data.label = result.label;
       if (!requestedBranchName) branchName = result.branchName ? `${branchPrefix}${result.branchName}` : fallbackBranch;
     } catch (err) {
