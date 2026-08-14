@@ -85,7 +85,7 @@ function UsageGraph({ repoFilter }) {
             </div>
             <span className="text-xs text-zinc-500">${total.toFixed(2)} total</span>
           </div>
-          <div className="flex items-end gap-px h-10" onMouseLeave={() => setHoveredDay(null)}>
+          <div className="flex items-stretch gap-px h-10" onMouseLeave={() => setHoveredDay(null)}>
             {days.map((day) => {
               const entry = dayMap[day];
               const claude = entry?.claude ?? 0;
@@ -96,7 +96,7 @@ function UsageGraph({ repoFilter }) {
               return (
                 <div
                   key={day}
-                  className="flex-1 flex flex-col-reverse gap-px cursor-default"
+                  className="flex-1 h-full flex flex-col-reverse gap-px cursor-default"
                   onMouseEnter={() => setHoveredDay({ day, claude, cursor, total })}
                 >
                   {claude > 0 && (
