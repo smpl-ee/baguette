@@ -33,8 +33,7 @@ export default function ApprovalsDropdown() {
   const handleApprovalClick = (approval) => {
     setOpen(false);
     const session = sessionById.get(approval.sessionId);
-    const isModalMode =
-      session?.agent_type === 'reviewer' ? !!user?.reviewer_modal_mode : !!user?.builder_modal_mode;
+    const isModalMode = !!user?.builder_modal_mode;
     if (!isModalMode) {
       if (session) navigate(`/session/${session.short_id}`);
     } else {

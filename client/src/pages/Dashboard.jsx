@@ -6,10 +6,8 @@ import { useSessionsContext } from '../context/SessionsContext.jsx';
 import { useRepoContext } from '../context/RepoContext.jsx';
 import SessionCard from '../components/SessionCard.jsx';
 import BuilderForm from '../components/BuilderForm.jsx';
-import ReviewerForm from '../components/ReviewerForm.jsx';
 import { apiFetch } from '../api.js';
 import { fileToContentBlock } from '../utils/fileToContentBlock.js';
-import { usePersistentState } from '../hooks/usePersistentState.js';
 import NoReposCard from '../components/NoReposCard.jsx';
 import { useFilters } from '../context/FilterContext.jsx';
 
@@ -171,16 +169,12 @@ function UsageGraph({ repoFilter }) {
 
 export default function Dashboard() {
   const [creating, setCreating] = useState(false);
-  const [_creatingAgentSdk, setCreatingAgentSdk] = useState('claude');
   const [createError, setCreateError] = useState(null);
   const [formKey, setFormKey] = useState(0);
   const location = useLocation();
   const navigate = useNavigate();
   const { sessions, loading, hasMore, loadMore } = useSessionsContext();
   const { repos, loading: loadingRepos, selectedRepo, setSelectedRepo } = useRepoContext();
-
-  const persistentDash = usePersistentState('dashboard');
-  const [agentType, setAgentType] = persistentDash.useState('agentType', 'builder');
   const { showArchived, setShowArchived } = useFilters();
 
   const [initDefaults, setInitDefaults] = useState(() => location.state ?? {});
@@ -227,7 +221,6 @@ export default function Dashboard() {
       }
     }
     setCreating(true);
-    setCreatingAgentSdk(agentSdk || 'claude');
     setCreateError(null);
     try {
       await sessionsService.create(params);
@@ -239,31 +232,6 @@ export default function Dashboard() {
       return true;
     } catch (err) {
       setCreateError(err?.message ?? 'Failed to create session');
-      return false;
-    } finally {
-      setCreating(false);
-    }
-  };
-
-  const handleCreateReviewer = async ({ repoFullName, prNumber, model, extraInstructions }) => {
-    const params = {
-      repo_full_name: repoFullName,
-      agent_type: 'reviewer',
-      pr_number: prNumber,
-      base_branch: '',
-      initial_prompt: extraInstructions
-        ? `Please review PR #${prNumber}\n\n${extraInstructions}`
-        : `Please review PR #${prNumber}`,
-    };
-    if (model) params.model = model;
-    setCreating(true);
-    setCreateError(null);
-    try {
-      await sessionsService.create(params);
-      setFormKey((k) => k + 1);
-      return true;
-    } catch (err) {
-      setCreateError(err?.message ?? 'Failed to create review session');
       return false;
     } finally {
       setCreating(false);
@@ -284,9 +252,7 @@ export default function Dashboard() {
             <div className="flex flex-col items-center gap-3">
               <Loader2 className="w-10 h-10 animate-spin text-amber-400" />
               <p className="text-sm font-medium text-zinc-100">
-                {agentType === 'reviewer'
-                  ? 'Starting your review session…'
-                  : 'Starting your agent session…'}
+                Starting your agent session…
               </p>
               <p className="text-xs text-zinc-400">This usually only takes a few seconds.</p>
             </div>
@@ -309,48 +275,13 @@ export default function Dashboard() {
         {!loadingRepos && repos.length === 0 ? (
           <NoReposCard />
         ) : (
-          <>
-            {/* Agent type tabs */}
-            <div className="flex gap-1 mb-4 bg-zinc-800/50 rounded-md p-0.5 w-fit">
-              <button
-                onClick={() => setAgentType('builder')}
-                className={`px-4 py-1.5 rounded text-xs font-medium transition-colors ${
-                  agentType === 'builder'
-                    ? 'bg-zinc-700 text-white'
-                    : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                Builder
-              </button>
-              <button
-                onClick={() => setAgentType('reviewer')}
-                className={`px-4 py-1.5 rounded text-xs font-medium transition-colors ${
-                  agentType === 'reviewer'
-                    ? 'bg-violet-600/60 text-violet-200'
-                    : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                Reviewer
-              </button>
-            </div>
-
-            {agentType === 'builder' ? (
-              <BuilderForm
-                key={`builder-${formKey}`}
-                onSubmit={handleCreate}
-                loading={creating}
-                repoFullName={selectedRepo}
-                defaultPrompt={initPrompt || ''}
-              />
-            ) : (
-              <ReviewerForm
-                key={`reviewer-${formKey}`}
-                onSubmit={handleCreateReviewer}
-                loading={creating}
-                repoFullName={selectedRepo}
-              />
-            )}
-          </>
+          <BuilderForm
+            key={`builder-${formKey}`}
+            onSubmit={handleCreate}
+            loading={creating}
+            repoFullName={selectedRepo}
+            defaultPrompt={initPrompt || ''}
+          />
         )}
       </div>
 

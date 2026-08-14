@@ -23,19 +23,3 @@ export async function buildSystemPromptAppend(sessionRow) {
   });
 }
 
-/**
- * Builds the full system prompt append string for a reviewer session.
- * Returns the rendered reviewer-prompt.md template with all variables substituted.
- */
-export async function buildReviewerSystemPromptAppend(sessionRow) {
-  return loadPrompt('reviewer-prompt', {
-    worktree_path: sessionRow.absolute_worktree_path,
-    pr_number: String(sessionRow.pr_number || ''),
-    repo_full_name: sessionRow.repo_full_name || '',
-    base_prompt: await loadPrompt('base-prompt', {
-      worktree_path: sessionRow.absolute_worktree_path,
-      working_directory_restrictions:
-        'Work exclusively within your current working directory. Do NOT modify, create, or delete any files.',
-    }),
-  });
-}

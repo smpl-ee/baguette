@@ -771,7 +771,6 @@ function NotificationsTab({ settings, onSave }) {
 
   const isDisabled = saving;
   const builderModal = !!settings?.builder_modal_mode;
-  const reviewerModal = !!settings?.reviewer_modal_mode;
 
   return (
     <div className="space-y-10">
@@ -783,17 +782,10 @@ function NotificationsTab({ settings, onSave }) {
         </p>
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 sm:p-5">
           <ToggleRow
-            label="Builder sessions — Modal approval"
-            description="When enabled, approval requests in builder sessions interrupt your work with a modal dialog. When disabled, they appear inline in the session chat."
+            label="Modal approval"
+            description="When enabled, approval requests interrupt your work with a modal dialog. When disabled, they appear inline in the session chat."
             value={builderModal}
             onChange={() => handleToggle('builder_modal_mode')}
-            disabled={isDisabled}
-          />
-          <ToggleRow
-            label="Reviewer sessions — Modal approval"
-            description="When enabled, approval requests from reviewer agents interrupt your work with a modal dialog. When disabled, they appear inline in the session chat."
-            value={reviewerModal}
-            onChange={() => handleToggle('reviewer_modal_mode')}
             disabled={isDisabled}
           />
         </div>
@@ -803,12 +795,6 @@ function NotificationsTab({ settings, onSave }) {
 }
 
 // ─── AgentTab ─────────────────────────────────────────────────────────────────
-
-const PERMISSION_MODES = [
-  { value: 'default', label: 'Default (ask for approval)' },
-  { value: 'acceptEdits', label: 'Accept Edits (auto-approve file changes)' },
-  { value: 'bypassPermissions', label: 'Bypass All Permissions' },
-];
 
 const AGENT_SDK_OPTIONS = [
   { value: 'claude', label: 'Claude' },
@@ -824,7 +810,6 @@ function AgentTab({ settings, onSave }) {
   const [cursorVariantIdx, setCursorVariantIdx] = useState(null);
   const savedCursorParamsRef = useRef(null);
   const [defaultAgentSdk, setDefaultAgentSdk] = useState('claude');
-  const [permissionMode, setPermissionMode] = useState('default');
   const [anthropicApiKey, setAnthropicApiKey] = useState(null);
   const [anthropicApiKeyDirty, setAnthropicApiKeyDirty] = useState(false);
   const [cursorApiKey, setCursorApiKey] = useState(null);
@@ -889,8 +874,6 @@ function AgentTab({ settings, onSave }) {
       savedCursorParamsRef.current = null;
     }
     setDefaultAgentSdk(settings.default_agent_sdk || 'claude');
-    const mode = settings.default_permission_mode || 'default';
-    setPermissionMode(mode === 'plan' ? 'default' : mode);
     setBranchPrefix(settings.branch_prefix ?? 'baguette/');
     setAllowedCommands(settings.allowed_commands || []);
     setAnthropicApiKey(null);
@@ -938,7 +921,6 @@ function AgentTab({ settings, onSave }) {
             ? JSON.stringify({ id: cursorModel, params: selectedCursorVariant.params })
             : cursorModel,
         default_agent_sdk: defaultAgentSdk,
-        default_permission_mode: permissionMode,
         branch_prefix: branchPrefix,
         allowed_commands: allowedCommands,
       };
@@ -1077,22 +1059,6 @@ function AgentTab({ settings, onSave }) {
       {/* Claude */}
       <div className="space-y-4 max-w-xl">
         <h2 className="text-sm font-semibold text-zinc-300">Claude</h2>
-        <div>
-          <label className="block text-sm font-medium text-zinc-300 mb-1">
-            Default permission mode
-          </label>
-          <select
-            value={permissionMode}
-            onChange={(e) => setPermissionMode(e.target.value)}
-            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
-          >
-            {PERMISSION_MODES.map((m) => (
-              <option key={m.value} value={m.value}>
-                {m.label}
-              </option>
-            ))}
-          </select>
-        </div>
         <div>
           <div className="flex items-center justify-between mb-1">
             <label className="text-sm font-medium text-zinc-300">Default model</label>

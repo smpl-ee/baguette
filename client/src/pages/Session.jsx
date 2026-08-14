@@ -417,14 +417,6 @@ export default function Session() {
     return () => document.removeEventListener('mousedown', handleClick);
   }, [showMenu]);
 
-  const handleModeChange = (mode) => {
-    if (!session?.id) return;
-    sessionsService
-      .patch(session.id, { permission_mode: mode })
-      .catch((err) => toastError('Failed to update permission mode', err));
-    setShowMenu(false);
-  };
-
   const handlePlanToggle = () => {
     if (!session?.id) return;
     sessionsService
@@ -554,8 +546,7 @@ export default function Session() {
     (p) => p.sessionId === session?.id && dismissedApprovalIds.has(p.requestId)
   );
 
-  const isModalMode =
-    session?.agent_type === 'reviewer' ? !!user?.reviewer_modal_mode : !!user?.builder_modal_mode;
+  const isModalMode = !!user?.builder_modal_mode;
 
   // When modal approval is disabled for this session type, show the approval inline in chat
   const inlineApproval = !isModalMode
@@ -645,15 +636,6 @@ export default function Session() {
           <div className="flex items-center gap-1.5 shrink-0">
             {!isReadonly && (
               <>
-                <select
-                  value={session.permission_mode}
-                  onChange={(e) => handleModeChange(e.target.value)}
-                  className="hidden sm:block bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-300 focus:outline-none"
-                >
-                  <option value="default">Ask approval</option>
-                  <option value="acceptEdits">Accept Edits</option>
-                  <option value="bypassPermissions">Bypass permissions</option>
-                </select>
                 <button
                   onClick={handlePlanToggle}
                   title={session.plan_mode ? 'Disable Plan Mode' : 'Enable Plan Mode'}
@@ -769,26 +751,6 @@ export default function Session() {
                         </div>
                       );
                     })()}
-                    <div className="p-2 border-b border-zinc-800 sm:hidden">
-                      <div className="text-[11px] text-zinc-500 px-2 py-1">Permission Mode</div>
-                      {[
-                        { value: 'default', label: 'Default' },
-                        { value: 'acceptEdits', label: 'Accept Edits' },
-                        { value: 'bypassPermissions', label: 'Bypass' },
-                      ].map((m) => (
-                        <button
-                          key={m.value}
-                          onClick={() => handleModeChange(m.value)}
-                          className={`w-full text-left px-2 py-1.5 text-xs rounded transition-colors ${
-                            session.permission_mode === m.value
-                              ? 'text-amber-400 bg-amber-500/10'
-                              : 'text-zinc-300 hover:bg-zinc-800'
-                          }`}
-                        >
-                          {m.label}
-                        </button>
-                      ))}
-                    </div>
                     <div className="p-2 border-b border-zinc-800 sm:hidden">
                       <button
                         onClick={handlePlanToggle}

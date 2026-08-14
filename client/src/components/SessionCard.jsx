@@ -79,11 +79,6 @@ export default function SessionCard({ session }) {
               · ${parseFloat(session.total_cost_usd).toFixed(3)}
             </span>
           )}
-          {session.agent_type === 'reviewer' && (
-            <span className="shrink-0 text-xs text-violet-400 border border-violet-500/30 rounded px-1 py-0.5 leading-none">
-              review
-            </span>
-          )}
         </div>
         <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
           {dismissedApproval && (
@@ -110,16 +105,12 @@ export default function SessionCard({ session }) {
         </div>
       </div>
       <div className="text-xs text-zinc-400 mt-1 mb-1.5 sm:mb-2 ml-5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
-        {session.agent_type === 'reviewer' && session.pr_number ? (
-          <span>PR #{session.pr_number}</span>
-        ) : (
-          <>
-            {session.base_branch && <span>{session.base_branch}</span>}
-            {session.created_branch && (
-              <span className="text-zinc-600">→ {session.created_branch}</span>
-            )}
-          </>
-        )}
+        <>
+          {session.base_branch && <span>{session.base_branch}</span>}
+          {session.created_branch && (
+            <span className="text-zinc-600">→ {session.created_branch}</span>
+          )}
+        </>
         {session.model && (
           <span className="text-zinc-700 flex items-center gap-1">
             <span>·</span>

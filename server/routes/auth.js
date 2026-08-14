@@ -166,7 +166,6 @@ export function createAuthRoutes(app) {
         avatar_url: user.avatar_url,
         approved: !!user.approved,
         builder_modal_mode: !!user.builder_modal_mode,
-        reviewer_modal_mode: !!user.reviewer_modal_mode,
       },
     });
   });

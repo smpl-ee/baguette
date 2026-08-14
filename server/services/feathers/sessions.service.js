@@ -27,7 +27,7 @@ import { DEFAULT_PAGINATE, PUBLIC_HOST, DATA_DIR, resolveDataDirRelativePath } f
 import path from 'path';
 import { buildTaskEnv, getClaudeEnvForSession } from '../session-env.js';
 import { getEffectiveGithubToken } from '../agent-settings.js';
-import { buildSystemPromptAppend, buildReviewerSystemPromptAppend } from '../session-prompt.js';
+import { buildSystemPromptAppend } from '../session-prompt.js';
 
 function getPreviewAuthUri(shortId) {
   const url = new URL('/preview', PUBLIC_HOST);
@@ -446,14 +446,11 @@ async function ensureShortId(context) {
 }
 
 async function prepareSessionEnvironment(context) {
-  const continueExistingBranch =
-    context.data.agent_type !== 'reviewer' && !(context.data.create_new_branch ?? true);
+  const continueExistingBranch = !(context.data.create_new_branch ?? true);
 
   const {
     repo_full_name: repoFullName,
-    agent_type: agentType,
     base_branch: baseBranch,
-    pr_number: prNumber,
   } = context.data;
   if (!repoFullName) return context; // headless/system session — no worktree needed
 
@@ -462,32 +459,7 @@ async function prepareSessionEnvironment(context) {
   const shortId = context.data.short_id;
   const repo = await db('repos').where({ full_name: repoFullName }).first();
 
-  if (agentType === 'reviewer') {
-    if (repoFullName.startsWith('/') || !repoFullName.includes('/')) {
-      throw new BadRequest('PR review is not available for local repositories.');
-    }
-    const pr = await getOpenPRByNumber(token, repoFullName, prNumber);
-    const { worktreePath: absoluteWorktreePath } = await createWorktree(
-      repo,
-      pr.head.ref,
-      shortId,
-      token,
-      { baseBranch: pr.base.ref }
-    );
-    Object.assign(context.data, {
-      worktree_path: path.relative(DATA_DIR, absoluteWorktreePath),
-      repo_id: repo.id,
-      pr_number: pr.number,
-      pr_url: pr.html_url,
-      pr_status: 'open',
-      pr_description: pr.body ?? null,
-      base_branch: pr.base.ref,
-      created_branch: pr.head.ref,
-      remote_branch: pr.head.ref,
-      label: `Review: ${pr.title}`,
-      plan_mode: 1,
-    });
-  } else if (continueExistingBranch) {
+  if (continueExistingBranch) {
     const workingBranch = baseBranch;
     const branchInUse = await db('sessions')
       .where({ repo_full_name: repoFullName })
@@ -749,10 +721,7 @@ async function persistSystemPrompt(context) {
   const session = context.result;
   if (!session.repo_full_name) return context;
 
-  const promptAppend =
-    session.agent_type === 'reviewer'
-      ? await buildReviewerSystemPromptAppend(session)
-      : await buildSystemPromptAppend(session);
+  const promptAppend = await buildSystemPromptAppend(session);
 
   if (!promptAppend) return context;
 

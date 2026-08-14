@@ -4,7 +4,7 @@
 
 ## What is Baguette?
 
-Baguette is a self-hosted orchestrator for [Claude Code](https://platform.claude.com/docs/en/agent-sdk/typescript) that runs in the cloud, giving you AI-powered coding sessions with GitHub integration, isolated test environments, and the ability to review and merge changes — from any device, including your phone.
+Baguette is a self-hosted orchestrator for AI coding agents that runs in the cloud, giving you AI-powered coding sessions with GitHub integration, isolated test environments, and the ability to review and merge changes — from any device, including your phone. It supports both [Claude Code](https://platform.claude.com/docs/en/agent-sdk/typescript) and [Cursor](https://cursor.com) as agent backends.
 
 - **Runs in the cloud, accessible anywhere** -- Deploy to your own VPS or EC2 instance and develop from any device, including your phone.
 - **Tests and dev servers for every session** -- Baguette configures the host to run databases, tests, and whatever else your project needs, isolated per session.
@@ -12,22 +12,21 @@ Baguette is a self-hosted orchestrator for [Claude Code](https://platform.claude
 
 **What it isn't:**
 
-- **An isolated environment to run agents** -- Baguette is as secured as editing code with Claude Code having more or less limited access (permission mode) to the shell of the underlying host. The good news is you can run it on a dedicated machine with limited accesses.
+- **An isolated environment to run agents** -- Baguette runs agents with full shell access on the host. The good news is you can run it on a dedicated machine with limited access.
 - **A multi-tenant platform** -- This is primarily intended for a single user or a close group of builders who don't mind sharing the code (no filesystem isolation) they work on and the machine resources (CPU, memory, database servers, etc.).
 
 ## Features
 
 - **GitHub OAuth** -- Sign in with GitHub to create branches and PRs on your behalf.
-- **Builder & Reviewer agents** -- Start a Builder session to write code, run tests, and open PRs. Start a Reviewer session on any open PR to analyze changes, post inline comments, and submit a formal review.
-- **Session management** -- Spin up Claude sessions from any branch of any repo. Each session gets its own git worktree.
+- **Claude & Cursor agents** -- Choose between Claude Code and Cursor as the agent backend when creating a session. Both support Start (agent) and Plan modes.
+- **Session management** -- Spin up sessions from any branch of any repo. Each session gets its own git worktree.
 - **Live preview** -- Test your session's changes live in the browser. Each session gets a subdomain hooked to its development server, its own database, and the rest of its isolated stack ([read more](docs/session-management.md#web-server-preview)).
-- **Automatic PR creation** -- After Claude's first round of changes, a branch and PR are automatically created with an AI-generated title and description.
+- **Automatic PR creation** -- After the first round of changes, a branch and PR are automatically created with an AI-generated title and description.
 - **Task execution** -- Run arbitrary commands within a session's working directory. Tail logs, kill processes, and track running tasks per-session and globally.
-- **Permission control** -- Switch between permission modes and interactively approve or deny individual tool calls from the UI.
 - **Diff view** -- Browse the session's current git diff with per-file sections and inline/split toggle.
 - **File attachments** -- Attach images and files to any chat message.
-- **Cost tracking** -- Track session costs on session cards, with a daily chart and usage breakdown per repo.
-- **Secrets** -- Inject global secrets into all Claude sessions and tasks via `.baguette.yaml` placeholders.
+- **Cost tracking** -- Track session costs on session cards, with a daily chart and usage breakdown per repo (Claude and Cursor costs tracked separately).
+- **Secrets** -- Inject global secrets into all sessions and tasks via `.baguette.yaml` placeholders.
 - **Session config (`.baguette.yaml`)** -- Define per-session env vars, init commands, tasks with port allocation and dependencies, and cleanup in your repo. See **[docs/project-configuration.md](docs/project-configuration.md)**.
 - **User approval** -- First user is auto-approved; subsequent users require approval from an existing user.
 
@@ -42,7 +41,7 @@ Baguette is a self-hosted orchestrator for [Claude Code](https://platform.claude
 
 - Node.js 20+
 - A [GitHub OAuth App](https://github.com/settings/developers)
-- An [Anthropic API key](https://console.anthropic.com/)
+- An [Anthropic API key](https://console.anthropic.com/) and/or a [Cursor](https://cursor.com) API key
 
 ### Setup
 
@@ -81,7 +80,13 @@ npm run migrate
 curl -fsSL https://claude.ai/install.sh | bash
 ```
 
-6. Sign-in with your Github account and enter your Anthropic API Key in **Settings** > **Agent** page.
+6. Sign in with your GitHub account and configure your agent(s) in **Settings** > **Agent**.
+
+### Configuring agents
+
+**Claude:** Enter your Anthropic API key and optionally set a default model. Claude Code must be installed (step 5 above).
+
+**Cursor:** Enter your Cursor API key and optionally set a default model and variant. No additional CLI installation required.
 
 ### Run
 
@@ -95,7 +100,7 @@ The Vite dev server runs on `http://localhost:5173` and proxies API/WebSocket re
 
 - **Backend**: Express, Feathers.js, SQLite (via Knex), Socket.io
 - **Frontend**: Vite, React, Tailwind CSS
-- **AI**: `@anthropic-ai/claude-agent-sdk`
+- **AI**: `@anthropic-ai/claude-agent-sdk`, `@cursor/sdk`
 
 ## Configuring your project
 

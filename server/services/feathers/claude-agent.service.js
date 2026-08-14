@@ -9,7 +9,7 @@ import {
 import { getClaudeEnv } from '../session-env.js';
 import { buildBaguetteMcpServer } from '../baguette-mcp-server.js';
 import { createMessageChannel } from '../message-channel.js';
-import { buildSystemPromptAppend, buildReviewerSystemPromptAppend } from '../session-prompt.js';
+import { buildSystemPromptAppend } from '../session-prompt.js';
 import { resolveDataDirRelativePath } from '../../config.js';
 import { SDK_QUERY_CLOSED_MESSAGE } from '../../claude-agent-sdk-constants.js';
 
@@ -87,21 +87,6 @@ async function buildBuilderQueryOptions(
     abortController,
     ...(allowedTools?.length ? { allowedTools } : {}),
     ...(pluginConfigs.length ? { plugins: pluginConfigs } : {}),
-  };
-}
-
-async function buildReviewerQueryOptions(
-  app,
-  sessionRow,
-  { canUseTool, abortController }
-) {
-  const systemPrompt = await buildReviewerSystemPromptAppend(sessionRow);
-  const baseOptions = await baseBuildQueryOptions(app, sessionRow, systemPrompt);
-  return {
-    ...baseOptions,
-    permissionMode: 'default',
-    canUseTool,
-    abortController,
   };
 }
 
@@ -232,53 +217,6 @@ export class ClaudeAgentService {
     );
   }
 
-  /**
-   * canUseTool for reviewer sessions: auto-allows read tools and reviewer MCP tools,
-   * proxies AskUserQuestion through the standard approval flow, denies everything else silently.
-   */
-  createReviewerCanUseTool(sessionId, userId, permissionRequests, sessionSettings) {
-    const ALLOWED_TOOLS = new Set([
-      'Read',
-      'Glob',
-      'Grep',
-      'LS',
-      'WebFetch',
-      'WebSearch',
-      'TodoWrite',
-      'TodoRead',
-      'Write', // needed to write/update the plan file used for review accumulation
-    ]);
-    const REVIEWER_MCP_TOOLS = new Set([
-      'mcp__baguette__PrRead',
-      'mcp__baguette__PrComments',
-      'mcp__baguette__PrComment',
-      'mcp__baguette__PrWorkflows',
-      'mcp__baguette__PrWorkflowLogs',
-      'mcp__baguette__GitDiff',
-      'mcp__baguette__ShowDiff',
-    ]);
-    // Reuse the full approval flow for AskUserQuestion so the user sees the question in the UI
-    const askUserQuestionHandler = this.createCanUseTool(
-      sessionId,
-      userId,
-      permissionRequests,
-      sessionSettings
-    );
-
-    return async (toolName, input, ctx) => {
-      if (toolName === 'AskUserQuestion' || toolName === 'ExitPlanMode') {
-        return askUserQuestionHandler(toolName, input, ctx);
-      }
-      if (ALLOWED_TOOLS.has(toolName) || REVIEWER_MCP_TOOLS.has(toolName)) {
-        return { behavior: 'allow', updatedInput: input };
-      }
-      return {
-        behavior: 'deny',
-        message: `'${toolName}' is not available in reviewer mode.`,
-      };
-    };
-  }
-
   createCanUseTool(sessionId, userId, permissionRequests, sessionSettings) {
     const app = this.app;
     return async (toolName, input, { signal }) => {
@@ -374,37 +312,24 @@ export class ClaudeAgentService {
     const channel = createMessageChannel();
     const permissionRequests = new Map();
     const abortController = new AbortController();
-    const isReviewer = sessionRow.agent_type === 'reviewer';
 
     const sessionSettings = {
       permissionMode: sessionRow.plan_mode ? 'plan' : sessionRow.permission_mode,
       bypassPermissions: sessionRow.permission_mode === 'bypassPermissions',
     };
-    const canUseTool = isReviewer
-      ? this.createReviewerCanUseTool(
-          sessionId,
-          sessionRow.user_id,
-          permissionRequests,
-          sessionSettings
-        )
-      : this.createCanUseTool(
-          sessionId,
-          sessionRow.user_id,
-          permissionRequests,
-          sessionSettings
-        );
-    const allowedTools = isReviewer ? [] : commandsToAllowedTools(getAllowedCommandsFromUser(user));
+    const canUseTool = this.createCanUseTool(
+      sessionId,
+      sessionRow.user_id,
+      permissionRequests,
+      sessionSettings
+    );
+    const allowedTools = commandsToAllowedTools(getAllowedCommandsFromUser(user));
 
-    const queryOptions = isReviewer
-      ? await buildReviewerQueryOptions(this.app, sessionRow, {
-          canUseTool,
-          abortController,
-        })
-      : await buildBuilderQueryOptions(this.app, sessionRow, {
-          canUseTool,
-          abortController,
-          allowedTools,
-        });
+    const queryOptions = await buildBuilderQueryOptions(this.app, sessionRow, {
+      canUseTool,
+      abortController,
+      allowedTools,
+    });
 
     const queryInstance = query({ prompt: channel, options: queryOptions });
 
@@ -416,7 +341,6 @@ export class ClaudeAgentService {
       branch: sessionRow.base_branch,
       absoluteWorktreePath,
       repoId: sessionRow.repo_id,
-      agentType: sessionRow.agent_type || 'builder',
       token: getEffectiveGithubToken(user),
       channel,
       queryInstance,

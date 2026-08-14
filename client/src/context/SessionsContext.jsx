@@ -157,10 +157,7 @@ export function SessionsProvider({ children }) {
         if (prev.some((p) => p.requestId === msg.requestId)) return prev;
         return [...prev, msg];
       });
-      const session = sessionsRef.current.find((s) => s.id === msg.sessionId);
-      const isReviewerAskQuestion =
-        session?.agent_type === 'reviewer' && msg.toolName === 'AskUserQuestion';
-      if (!isReviewerAskQuestion && isTabHidden()) {
+      if (isTabHidden()) {
         showBrowserNotification(
           'Approval required',
           msg.description || 'Claude needs your approval to continue.',

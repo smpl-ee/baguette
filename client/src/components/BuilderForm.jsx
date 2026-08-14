@@ -30,8 +30,6 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
   const [autoPush, setAutoPush] = persistentState.useState('autoPush', true);
   const { repos } = useRepoContext();
   const [agentSdk, setAgentSdk] = globalState.useState('agentSdk', 'claude');
-  const [permissionMode, setPermissionMode] = persistentState.useState('permissionMode', 'default');
-  const [cursorMode, setCursorMode] = persistentState.useState('cursorMode', 'agent');
   const [model, setModel] = persistentState.useState('model', '');
   const [models, setModels] = useState([]);
   const [cursorVariantIdx, setCursorVariantIdx] = useState(null);
@@ -75,9 +73,6 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
     usersService
       .get(user.id)
       .then((d) => {
-        if (d?.default_permission_mode && d.default_permission_mode !== 'plan') {
-          setPermissionMode((prev) => (prev === 'default' ? d.default_permission_mode : prev));
-        }
         if (d?.default_agent_sdk) {
           setAgentSdk((prev) => (prev === 'claude' ? d.default_agent_sdk : prev));
         }
@@ -164,8 +159,8 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
       branch,
       initialPrompt,
       files,
-      permissionMode: isCursor ? 'default' : permissionMode,
-      planMode: isCursor ? cursorMode === 'plan' : planMode,
+      permissionMode: 'bypassPermissions',
+      planMode,
       model: modelPayload,
       createNewBranch,
       branchName: branchName || undefined,
@@ -352,34 +347,6 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
                 </div>
               ) : null;
             })()}
-            {isCursor ? (
-              <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-1">Agent Mode</label>
-                <select
-                  value={cursorMode}
-                  onChange={(e) => setCursorMode(e.target.value)}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
-                >
-                  <option value="agent">Agent</option>
-                  <option value="plan">Plan</option>
-                </select>
-              </div>
-            ) : (
-              <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-1">
-                  Permission Mode
-                </label>
-                <select
-                  value={permissionMode}
-                  onChange={(e) => setPermissionMode(e.target.value)}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
-                >
-                  <option value="default">Ask for approval</option>
-                  <option value="acceptEdits">Accept Edits</option>
-                  <option value="bypassPermissions">Bypass All Permissions</option>
-                </select>
-              </div>
-            )}
 
             {/* Plugins — Claude only */}
             {!isCursor && availablePlugins.length > 0 && (
@@ -465,16 +432,14 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
           >
             {loading ? 'Creating...' : 'Start'}
           </button>
-          {!isCursor && (
-            <button
-              type="button"
-              onClick={handlePlan}
-              disabled={!canSubmit}
-              className="bg-zinc-800 hover:bg-zinc-700 disabled:bg-zinc-800 disabled:text-zinc-600 text-zinc-300 hover:text-white px-5 py-2.5 rounded-md text-sm font-medium transition-colors border border-zinc-700 disabled:border-zinc-700"
-            >
-              Plan
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={handlePlan}
+            disabled={!canSubmit}
+            className="bg-zinc-800 hover:bg-zinc-700 disabled:bg-zinc-800 disabled:text-zinc-600 text-zinc-300 hover:text-white px-5 py-2.5 rounded-md text-sm font-medium transition-colors border border-zinc-700 disabled:border-zinc-700"
+          >
+            Plan
+          </button>
         </div>
       </div>
     </form>

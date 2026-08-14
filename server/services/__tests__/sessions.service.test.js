@@ -27,7 +27,6 @@ const {
   loadBaguetteConfig,
   generateSessionMetadata,
   buildSystemPromptAppend,
-  buildReviewerSystemPromptAppend,
 } = vi.hoisted(() => ({
   stopSession: vi.fn().mockResolvedValue(undefined),
   onMessageCreated: vi.fn().mockResolvedValue(undefined),
@@ -37,7 +36,6 @@ const {
     .fn()
     .mockResolvedValue({ label: 'Test task', branchName: 'test-task-abc' }),
   buildSystemPromptAppend: vi.fn().mockResolvedValue('mocked builder system prompt'),
-  buildReviewerSystemPromptAppend: vi.fn().mockResolvedValue('mocked reviewer system prompt'),
 }));
 
 vi.mock('child_process', () => ({
@@ -62,7 +60,6 @@ vi.mock('../baguette-config.js', async (importOriginal) => {
 
 vi.mock('../session-prompt.js', () => ({
   buildSystemPromptAppend,
-  buildReviewerSystemPromptAppend,
 }));
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
@@ -780,39 +777,6 @@ describe('Sessions service - find, get, create', (hooks) => {
         ([data]) => data.type === 'user'
       );
       expect(promptIdx).toBeLessThan(userMsgIdx);
-    });
-
-    it('uses the reviewer prompt for reviewer sessions', async () => {
-      const { getOpenPRByNumber } = await import('../github.js');
-      getOpenPRByNumber.mockResolvedValueOnce({
-        number: 10,
-        html_url: 'https://github.com/test/repo/pull/10',
-        title: 'Some PR',
-        head: { ref: 'feature/review-me' },
-        base: { ref: 'main' },
-      });
-
-      const createMessage = vi.fn().mockResolvedValue({ id: 99 });
-      app.use('messages', { create: createMessage });
-
-      await app.service('sessions').create(
-        sessionData({
-          repo_id: repoId,
-          agent_type: 'reviewer',
-          pr_number: 10,
-          initial_prompt: 'Review this PR',
-        }),
-        params({ id: userId1 })
-      );
-
-      expect(buildReviewerSystemPromptAppend).toHaveBeenCalledTimes(1);
-      expect(buildSystemPromptAppend).not.toHaveBeenCalled();
-      const promptCall = createMessage.mock.calls.find(
-        ([data]) => data.type === 'system' && data.subtype === 'prompt'
-      );
-      expect(promptCall).toBeTruthy();
-      const parsed = JSON.parse(promptCall[0].message_json);
-      expect(parsed.content).toBe('mocked reviewer system prompt');
     });
 
     it('create_new_branch=false rejects when another unarchived session uses that branch', async () => {
