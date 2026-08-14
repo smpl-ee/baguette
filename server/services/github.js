@@ -452,15 +452,15 @@ export async function gitFetch(worktreePath, token, branch) {
  * Push the current HEAD to origin and return the branch name.
  * Throws with a `rejected` property if the push is rejected.
  */
-export async function gitPush(worktreePath, token, { force = false } = {}) {
-  const { stdout: branchOut } = await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
-    cwd: worktreePath,
-  });
-  const branch = branchOut.trim();
+export async function gitPush(worktreePath, token, { branch, force = false, forceOverwrite = false } = {}) {
+  const targetBranch = branch ?? (
+    await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: worktreePath })
+  ).stdout.trim();
 
   const pushArgs = ['push', '--set-upstream'];
-  if (force) pushArgs.push('--force-with-lease');
-  pushArgs.push('origin', branch);
+  if (forceOverwrite) pushArgs.push('--force');
+  else if (force) pushArgs.push('--force-with-lease');
+  pushArgs.push('origin', targetBranch);
 
   try {
     await gitWithToken(token, pushArgs, {
@@ -470,7 +470,7 @@ export async function gitPush(worktreePath, token, { force = false } = {}) {
   } catch (pushErr) {
     const stderr = pushErr.stderr?.toString() ?? '';
     if (stderr.includes('[rejected]') || stderr.includes('Updates were rejected')) {
-      const guidance = force
+      const guidance = force || forceOverwrite
         ? 'Force push rejected: the remote ref has been updated since your last fetch. ' +
           'Call GitFetch to update your tracking refs, then try GitPush with force again.'
         : 'Push rejected: the remote has changes not present locally. ' +
@@ -482,7 +482,7 @@ export async function gitPush(worktreePath, token, { force = false } = {}) {
     throw pushErr;
   }
 
-  return { ok: true, branch };
+  return { ok: true, branch: targetBranch };
 }
 
 // 5 MB: unified diff is plain text, so 5 MB comfortably covers even very large
@@ -1012,4 +1012,69 @@ export async function upsertPR(
   }
   const data = await res.json();
   return { url: data.html_url, number: data.number };
+}
+
+const GH_HEADERS = (token) => ({
+  Authorization: `Bearer ${token}`,
+  Accept: 'application/vnd.github.v3+json',
+  'User-Agent': 'baguette-app',
+});
+
+export async function listRepoPRs(token, repoFullName, { state = 'open', author, label, base, text } = {}) {
+  const headers = GH_HEADERS(token);
+
+  if (author || label || text) {
+    const parts = ['is:pr', `repo:${repoFullName}`, `is:${state}`];
+    if (author) parts.push(`author:${author}`);
+    if (label) parts.push(`label:${label}`);
+    if (text) parts.push(text);
+    const q = encodeURIComponent(parts.join(' '));
+    const res = await fetch(
+      `https://api.github.com/search/issues?q=${q}&per_page=30&sort=updated`,
+      { headers }
+    );
+    if (!res.ok) throw new Error(`GitHub API error: ${await res.text()}`);
+    const data = await res.json();
+    return data.items.map((pr) => ({
+      number: pr.number,
+      title: pr.title,
+      author: pr.user?.login,
+      state: pr.state,
+      html_url: pr.html_url,
+      labels: pr.labels?.map((l) => l.name) ?? [],
+      updated_at: pr.updated_at,
+    }));
+  }
+
+  const params = new URLSearchParams({ state, sort: 'updated', per_page: '50' });
+  if (base) params.set('base', base);
+  const res = await fetch(
+    `https://api.github.com/repos/${repoFullName}/pulls?${params}`,
+    { headers }
+  );
+  if (!res.ok) throw new Error(`GitHub API error: ${await res.text()}`);
+  const prs = await res.json();
+  return prs.map((pr) => ({
+    number: pr.number,
+    title: pr.title,
+    author: pr.user?.login,
+    state: pr.state,
+    html_url: pr.html_url,
+    draft: pr.draft,
+    head: pr.head.ref,
+    base: pr.base.ref,
+    labels: pr.labels?.map((l) => l.name) ?? [],
+    updated_at: pr.updated_at,
+  }));
+}
+
+export async function listRepoTags(token, repoFullName) {
+  const headers = GH_HEADERS(token);
+  const res = await fetch(
+    `https://api.github.com/repos/${repoFullName}/tags?per_page=50`,
+    { headers }
+  );
+  if (!res.ok) throw new Error(`GitHub API error: ${await res.text()}`);
+  const tags = await res.json();
+  return tags.map((t) => ({ name: t.name, sha: t.commit?.sha }));
 }

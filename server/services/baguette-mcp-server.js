@@ -17,6 +17,8 @@ import {
   getPRWorkflows,
   getPRWorkflowLogs,
   addReactionToComment,
+  listRepoPRs,
+  listRepoTags,
 } from './github.js';
 import { loadBaguetteConfig, getAvailableCommands, getAvailableTasks } from './baguette-config.js';
 import loadPrompt from '../prompts/loadPrompt.js';
@@ -156,14 +158,22 @@ function buildBaguetteToolList(session, app) {
       {
         name: 'GitPush',
         description:
-          'Push the current branch to origin and set upstream. Use force: true to push with --force-with-lease when the remote history has diverged (e.g. after a rebase).',
+          'Push a branch to origin and set upstream. For normal pushes, omit all parameters. Use force: "lease" after a rebase (--force-with-lease). Use force: "force" or a non-session branch to open the Push modal for user confirmation before pushing.',
         schema: {
-          force: z
-            .boolean()
+          branch: z
+            .string()
             .optional()
-            .describe('Use --force-with-lease to force push (e.g. after a rebase)'),
+            .describe(
+              'Branch to push (defaults to current session branch). Specifying a different branch opens the Push modal for user confirmation.'
+            ),
+          force: z
+            .enum(['lease', 'force'])
+            .optional()
+            .describe(
+              '"lease" = --force-with-lease (safe, use after rebase); "force" = --force (destructive, opens the Push modal for user confirmation)'
+            ),
         },
-        handler: async ({ force = false } = {}) => {
+        handler: async ({ branch, force } = {}) => {
           const localErr = await requireGitHubRepo();
           if (localErr) return localErr;
           if (!session.auto_push) {
@@ -172,14 +182,33 @@ function buildBaguetteToolList(session, app) {
                 'Auto-push is disabled. Changes have been committed locally. The user can push manually or enable auto-push using the controls at the bottom of the chat. You should still call ReadSessionInfo and UpdateSession to ensure the session label and description are up to date.',
             });
           }
+
+          const freshSession = await getSession();
+          const sessionBranch = freshSession.remote_branch || freshSession.created_branch;
+          const isPureForce = force === 'force';
+          const isNonSessionBranch = branch && branch !== sessionBranch;
+
+          if (isPureForce || isNonSessionBranch) {
+            app.service('sessions').emit('push:request', {
+              sessionId: session.id,
+              branch: branch || sessionBranch,
+              forceMode: force || null,
+            });
+            return ok({
+              message:
+                'The Push modal has been opened with your settings. Please review and confirm the push in the UI.',
+            });
+          }
+
           let result;
           try {
-            result = await gitPush(absoluteWorktreePath, await getToken(), { force });
+            result = await gitPush(absoluteWorktreePath, await getToken(), {
+              force: force === 'lease',
+            });
           } catch (err) {
             if (err.rejected) return fail(err.message);
             throw err;
           }
-          const freshSession = await getSession();
           await patchSession({ remote_branch: result.branch, created_branch: result.branch });
           if (freshSession?.pr_status === 'merged') {
             return ok({
@@ -536,6 +565,61 @@ function buildBaguetteToolList(session, app) {
             endByte,
           });
           return ok(result);
+        },
+      },
+
+      {
+        name: 'ListGithubPrs',
+        description:
+          'List pull requests for the current repo with optional filters. When author, label, or text is provided, uses the GitHub Search API. Otherwise uses the Pulls API.',
+        schema: {
+          state: z
+            .enum(['open', 'closed', 'all'])
+            .optional()
+            .describe('PR state filter (default: open)'),
+          author: z.string().optional().describe('Filter by GitHub username (author of the PR)'),
+          label: z.string().optional().describe('Filter by label name'),
+          base: z
+            .string()
+            .optional()
+            .describe('Filter by base branch (only used when author/label/text are not set)'),
+          text: z.string().optional().describe('Full-text search query'),
+        },
+        handler: async ({ state = 'open', author, label, base, text } = {}) => {
+          const localErr = await requireGitHubRepo();
+          if (localErr) return localErr;
+          const repo = await getRepo();
+          if (!repo?.full_name) return fail('No repo linked to this session.');
+          try {
+            const prs = await listRepoPRs(await getToken(), repo.full_name, {
+              state,
+              author,
+              label,
+              base,
+              text,
+            });
+            return ok({ prs });
+          } catch (err) {
+            return fail(err.message);
+          }
+        },
+      },
+
+      {
+        name: 'ListGithubTags',
+        description: 'List git tags for the current repo (most recent 50).',
+        schema: {},
+        handler: async () => {
+          const localErr = await requireGitHubRepo();
+          if (localErr) return localErr;
+          const repo = await getRepo();
+          if (!repo?.full_name) return fail('No repo linked to this session.');
+          try {
+            const tags = await listRepoTags(await getToken(), repo.full_name);
+            return ok({ tags });
+          } catch (err) {
+            return fail(err.message);
+          }
         },
       },
 

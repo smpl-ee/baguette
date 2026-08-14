@@ -284,6 +284,7 @@ export default function Session() {
   const [models, setModels] = useState([]);
   const [pushing, setPushing] = useState(false);
   const [showPushModal, setShowPushModal] = useState(false);
+  const [pushRequest, setPushRequest] = useState(null);
   const [activeTaskModal, setActiveTaskModal] = useState(null);
   const [configCommands, setConfigCommands] = useState([]);
   const [error, setError] = useState(null);
@@ -376,6 +377,16 @@ export default function Session() {
     };
     sessionsService.on('app:error', onAppError);
     return () => sessionsService.off('app:error', onAppError);
+  }, [sessionId]);
+
+  useEffect(() => {
+    const onPushRequest = ({ sessionId: sid, branch, forceMode }) => {
+      if (sid !== sessionId) return;
+      setPushRequest({ branch, forceMode });
+      setShowPushModal(true);
+    };
+    sessionsService.on('push:request', onPushRequest);
+    return () => sessionsService.off('push:request', onPushRequest);
   }, [sessionId]);
 
   useEffect(() => {
@@ -475,12 +486,13 @@ export default function Session() {
     setShowPushModal(true);
   };
 
-  const handlePushConfirmed = async (force) => {
+  const handlePushConfirmed = async ({ forceMode, branch } = {}) => {
     if (!session?.id || pushing) return;
     setShowPushModal(false);
+    setPushRequest(null);
     setPushing(true);
     try {
-      await sessionsService.push(session.id, { force });
+      await sessionsService.push(session.id, { forceMode, branch });
       setCommitsToPush(0);
       toast.success('Pushed successfully');
     } catch (err) {
@@ -1066,10 +1078,16 @@ export default function Session() {
       {showPushModal && (
         <PushConfirmModal
           commitsToPush={commitsToPush}
+          initialBranch={pushRequest?.branch || session?.remote_branch || session?.created_branch}
+          initialForceMode={pushRequest?.forceMode || null}
           onConfirm={handlePushConfirmed}
-          onCancel={() => setShowPushModal(false)}
+          onCancel={() => {
+            setShowPushModal(false);
+            setPushRequest(null);
+          }}
           onEditDetails={() => {
             setShowPushModal(false);
+            setPushRequest(null);
             setView('edit');
           }}
         />
