@@ -49,44 +49,91 @@ function UsageGraph({ repoFilter }) {
     return null;
   if (total === 0 && (!byDay || byDay.length === 0)) return null;
 
-  const maxDay = byDay && byDay.length > 0 ? Math.max(...byDay.map((d) => d.cost_usd)) : 0;
+  const maxDay =
+    byDay && byDay.length > 0
+      ? Math.max(...byDay.map((d) => (d.claude ?? 0) + (d.cursor ?? 0)))
+      : 0;
 
   const days = [];
   for (let i = 29; i >= 0; i--) {
     const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
     days.push(d.toISOString().slice(0, 10));
   }
-  const dayMap = Object.fromEntries((byDay ?? []).map((r) => [r.day, r.cost_usd]));
+  const dayMap = Object.fromEntries((byDay ?? []).map((r) => [r.day, r]));
+
+  const hasCursor = byDay?.some((d) => (d.cursor ?? 0) > 0);
 
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 mb-4 sm:mb-6 space-y-4">
       {maxDay > 0 && (
         <div>
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-medium text-zinc-400">
-              Cost per day <span className="text-zinc-600 font-normal">(last 30d)</span>
-            </span>
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-medium text-zinc-400">
+                Cost per day <span className="text-zinc-600 font-normal">(last 30d)</span>
+              </span>
+              {hasCursor && (
+                <div className="flex items-center gap-2.5">
+                  <div className="flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-sm bg-amber-500/70 inline-block" />
+                    <span className="text-xs text-zinc-500">Claude</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-sm bg-sky-500/70 inline-block" />
+                    <span className="text-xs text-zinc-500">Cursor</span>
+                  </div>
+                </div>
+              )}
+            </div>
             <span className="text-xs text-zinc-500">${total.toFixed(2)} total</span>
           </div>
           <div className="flex items-end gap-px h-10" onMouseLeave={() => setHoveredDay(null)}>
             {days.map((day) => {
-              const cost = dayMap[day] ?? 0;
-              const pct = maxDay > 0 ? (cost / maxDay) * 100 : 0;
+              const entry = dayMap[day];
+              const claude = entry?.claude ?? 0;
+              const cursor = entry?.cursor ?? 0;
+              const total = claude + cursor;
+              const claudePct = maxDay > 0 ? (claude / maxDay) * 100 : 0;
+              const cursorPct = maxDay > 0 ? (cursor / maxDay) * 100 : 0;
               return (
                 <div
                   key={day}
-                  className="flex-1 bg-amber-500/70 rounded-sm min-h-px transition-all hover:bg-amber-400 cursor-default"
-                  style={{ height: `${Math.max(pct, cost > 0 ? 4 : 0)}%` }}
-                  onMouseEnter={() => setHoveredDay({ day, cost })}
-                />
+                  className="flex-1 flex flex-col-reverse gap-px cursor-default"
+                  onMouseEnter={() => setHoveredDay({ day, claude, cursor, total })}
+                >
+                  {claude > 0 && (
+                    <div
+                      className="bg-amber-500/70 rounded-sm transition-all hover:bg-amber-400"
+                      style={{ height: `${Math.max(claudePct, 4)}%` }}
+                    />
+                  )}
+                  {cursor > 0 && (
+                    <div
+                      className="bg-sky-500/70 rounded-sm transition-all hover:bg-sky-400"
+                      style={{ height: `${Math.max(cursorPct, 4)}%` }}
+                    />
+                  )}
+                  {total === 0 && (
+                    <div className="bg-zinc-700/30 rounded-sm" style={{ height: '1px' }} />
+                  )}
+                </div>
               );
             })}
           </div>
           <div className="h-4 mt-1">
-            {hoveredDay && (
+            {hoveredDay && hoveredDay.total > 0 && (
               <span className="text-xs text-zinc-400">
                 {hoveredDay.day}
-                <span className="text-zinc-500 ml-1.5">${hoveredDay.cost.toFixed(4)}</span>
+                {hasCursor && hoveredDay.claude > 0 && hoveredDay.cursor > 0 ? (
+                  <>
+                    <span className="text-amber-500/80 ml-1.5">${hoveredDay.claude.toFixed(4)}</span>
+                    <span className="text-zinc-600 mx-1">+</span>
+                    <span className="text-sky-500/80">${hoveredDay.cursor.toFixed(4)}</span>
+                    <span className="text-zinc-500 ml-1">= ${hoveredDay.total.toFixed(4)}</span>
+                  </>
+                ) : (
+                  <span className="text-zinc-500 ml-1.5">${hoveredDay.total.toFixed(4)}</span>
+                )}
               </span>
             )}
           </div>

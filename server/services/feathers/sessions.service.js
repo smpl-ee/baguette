@@ -408,6 +408,7 @@ export class SessionsService extends KnexService {
         user_id: session.user_id,
         repo_full_name: session.repo_full_name,
         cost_usd: costUpdate,
+        agent_sdk: session.agent_sdk || 'claude',
       });
       patch.total_cost_usd = prevCost + costUpdate;
     }

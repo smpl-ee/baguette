@@ -80,17 +80,24 @@ export default function createSettingsRoutes(requireAuth) {
       const rows = await db('usage')
         .where({ user_id: req.user.id })
         .where('created_at', '>=', since)
-        .select(db.raw('date(created_at) as day'))
+        .select(db.raw('date(created_at) as day'), 'agent_sdk')
         .sum('cost_usd as cost_usd')
-        .groupBy('day')
+        .groupBy('day', 'agent_sdk')
         .orderBy('day', 'asc');
 
-      res.json(
-        rows.map((r) => ({
-          day: r.day,
-          cost_usd: parseFloat(r.cost_usd),
-        }))
-      );
+      // Pivot to { day, claude, cursor } per day
+      const dayMap = {};
+      for (const r of rows) {
+        if (!dayMap[r.day]) dayMap[r.day] = { day: r.day, claude: 0, cursor: 0 };
+        const sdk = r.agent_sdk || 'claude';
+        if (sdk === 'cursor') {
+          dayMap[r.day].cursor = parseFloat(r.cost_usd);
+        } else {
+          dayMap[r.day].claude = parseFloat(r.cost_usd);
+        }
+      }
+
+      res.json(Object.values(dayMap).sort((a, b) => a.day.localeCompare(b.day)));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

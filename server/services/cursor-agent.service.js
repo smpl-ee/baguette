@@ -150,6 +150,7 @@ ${systemPrompt}`;
   async _runTurn(session, parsed) {
     const sessionId = session.id;
     const userId = session.user_id;
+    let turnFinishedOk = false;
 
     const sessionState = { isProcessing: true, userId, currentRun: null };
     this._activeSessions.set(sessionId, sessionState);
@@ -244,6 +245,7 @@ ${systemPrompt}`;
         if (sdkMsg.type === 'status') {
           const { status } = sdkMsg;
           if (status === 'FINISHED') {
+            turnFinishedOk = true;
             await this.app
               .service('sessions')
               .patch(sessionId, { status: 'completed' }, { user: { id: userId } });
@@ -272,6 +274,12 @@ ${systemPrompt}`;
 
       // Flush any remaining buffered content at end of stream
       await flushStreamBuffer();
+
+      if (turnFinishedOk) {
+        await this._recordTurnCost(session, agent).catch((err) =>
+          logger.warn({ sessionId, err: err.message }, 'cursor-agent: failed to record turn cost')
+        );
+      }
     } catch (err) {
       if (err.name !== 'AbortError') {
         logger.error({ sessionId }, 'Cursor session stream error');
@@ -349,6 +357,39 @@ ${systemPrompt}`;
       }
     }
     // SDKSystemMessage, SDKStatusMessage, SDKUsageMessage, SDKTaskMessage: not persisted as chat messages
+  }
+
+  async _recordTurnCost(session, agent) {
+    const db = this.app.get('db');
+    const sessionId = session.id;
+    const userId = session.user_id;
+
+    const agentUsage = await agent.getUsage();
+    const rawCostCents = agentUsage.cost?.rawCostCents ?? 0;
+    if (rawCostCents <= 0) return;
+
+    const newTotalCostUsd = rawCostCents / 100;
+    const prevRow = await db('usage').where({ session_id: sessionId }).sum('cost_usd as total').first();
+    const prevTotalCostUsd = parseFloat(prevRow?.total ?? 0);
+
+    const deltaCostUsd = newTotalCostUsd - prevTotalCostUsd;
+    if (deltaCostUsd <= 0) return;
+
+    await db('usage').insert({
+      session_id: sessionId,
+      user_id: userId,
+      repo_full_name: session.repo_full_name,
+      cost_usd: deltaCostUsd,
+      agent_sdk: 'cursor',
+    });
+
+    const currentSession = await db('sessions').where({ id: sessionId }).select('total_cost_usd').first();
+    const prevSessionCost = parseFloat(currentSession?.total_cost_usd ?? 0);
+    await this.app.service('sessions').patch(
+      sessionId,
+      { total_cost_usd: prevSessionCost + deltaCostUsd },
+      { provider: undefined, user: { id: userId } }
+    );
   }
 
   async _persistMessage(sessionId, userId, message) {
