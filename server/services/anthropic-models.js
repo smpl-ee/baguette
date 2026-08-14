@@ -2,7 +2,7 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 import * as cache from '../lib/cache.js';
 
 const MODELS_CACHE_KEY = 'anthropic-models';
-const MODELS_CACHE_TTL = 24 * 60 * 60; // 24 hours
+const MODELS_CACHE_TTL = Infinity;
 
 // Standard API models that may not appear in the agent SDK's supportedModels() list
 const EXTRA_MODELS = [

@@ -2,7 +2,7 @@ import { Cursor } from '@cursor/sdk';
 import * as cache from '../lib/cache.js';
 
 const MODELS_CACHE_KEY_PREFIX = 'cursor-models';
-const MODELS_CACHE_TTL = 24 * 60 * 60; // 24 hours
+const MODELS_CACHE_TTL = Infinity;
 
 export async function listCursorModels(apiKey) {
   const cacheKey = `${MODELS_CACHE_KEY_PREFIX}-keyed`;
