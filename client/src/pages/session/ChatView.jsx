@@ -240,32 +240,41 @@ export default function ChatView({
     const text = input.trim();
     setError(null);
     setFileError(null);
-    persistentState.clear();
+    const filesToSend = files;
     setFiles([]);
     if (chatInputRef.current) chatInputRef.current.style.height = 'auto';
 
+    setSending(true);
     let content;
-    if (files.length) {
-      setSending(true);
-      try {
-        const fileBlocks = await Promise.all(files.map(fileToContentBlock));
+    try {
+      if (filesToSend.length) {
+        const fileBlocks = await Promise.all(filesToSend.map(fileToContentBlock));
         content = text ? [{ type: 'text', text }, ...fileBlocks] : fileBlocks;
-      } catch (err) {
-        setFileError(err?.message ?? 'Failed to read attached files');
-        setInput(text);
-        setSending(false);
-        return;
+      } else {
+        content = text;
       }
+    } catch (err) {
+      setFileError(err?.message ?? 'Failed to read attached files');
+      setInput(text);
+      setFiles(filesToSend);
       setSending(false);
-    } else {
-      content = text;
+      return;
     }
 
-    messagesService.create({
-      session_id: session.id,
-      type: 'user',
-      message_json: JSON.stringify({ type: 'user', message: { role: 'user', content } }),
-    });
+    try {
+      await messagesService.create({
+        session_id: session.id,
+        type: 'user',
+        message_json: JSON.stringify({ type: 'user', message: { role: 'user', content } }),
+      });
+      persistentState.clear();
+    } catch (err) {
+      setInput(text);
+      setFiles(filesToSend);
+      toastError('Failed to send message', err);
+    } finally {
+      setSending(false);
+    }
   };
 
   return (
