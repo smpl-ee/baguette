@@ -524,6 +524,27 @@ export async function gitHasUncommitted(worktreePath) {
 }
 
 /**
+ * Returns the short SHA of HEAD and of a remote ref.
+ * If remoteBranch is provided, resolves `origin/<remoteBranch>`; otherwise uses `@{u}`.
+ * @returns {Promise<{ localSha: string|null, remoteSha: string|null }>}
+ */
+export async function gitLocalAndRemoteSha(worktreePath, remoteBranch = null) {
+  const remoteRef = remoteBranch ? `origin/${remoteBranch}` : '@{u}';
+  const [localResult, remoteResult] = await Promise.allSettled([
+    execFileAsync('git', ['-C', worktreePath, 'rev-parse', '--short', 'HEAD'], {
+      maxBuffer: 256,
+    }),
+    execFileAsync('git', ['-C', worktreePath, 'rev-parse', '--short', remoteRef], {
+      maxBuffer: 256,
+    }),
+  ]);
+  return {
+    localSha: localResult.status === 'fulfilled' ? localResult.value.stdout.trim() || null : null,
+    remoteSha: remoteResult.status === 'fulfilled' ? remoteResult.value.stdout.trim() || null : null,
+  };
+}
+
+/**
  * Returns the unified diff between baseBranch and HEAD in the worktree.
  * @returns {Promise<string>}
  */

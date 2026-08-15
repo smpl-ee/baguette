@@ -1,7 +1,12 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { X, Upload, Pencil, AlertTriangle } from 'lucide-react';
+import SearchableSelect from './SearchableSelect.jsx';
+import { useGetBranches } from '../hooks/useGetBranches.js';
+import { sessionsService } from '../feathers.js';
 
 export default function PushConfirmModal({
+  sessionId,
+  repo,
   commitsToPush,
   initialBranch,
   initialForceMode,
@@ -11,8 +16,42 @@ export default function PushConfirmModal({
 }) {
   const [forceMode, setForceMode] = useState(initialForceMode || '');
   const [branch, setBranch] = useState(initialBranch || '');
+  const [localSha, setLocalSha] = useState(null);
+  const [remoteSha, setRemoteSha] = useState(null);
+  const [loadingShas, setLoadingShas] = useState(false);
+
+  const { branches, loading: loadingBranches } = useGetBranches(repo);
 
   const isPureForce = forceMode === 'force';
+
+  useEffect(() => {
+    if (!sessionId || !branch) {
+      setLocalSha(null);
+      setRemoteSha(null);
+      return;
+    }
+    let cancelled = false;
+    setLoadingShas(true);
+    sessionsService
+      .shas({ id: sessionId, branch })
+      .then((res) => {
+        if (cancelled) return;
+        setLocalSha(res.localSha ?? null);
+        setRemoteSha(res.remoteSha ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLocalSha(null);
+          setRemoteSha(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingShas(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, branch]);
 
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
@@ -42,13 +81,27 @@ export default function PushConfirmModal({
         <div className="flex flex-col gap-3 mb-6">
           <div>
             <label className="block text-xs text-zinc-400 mb-1">Branch</label>
-            <input
-              type="text"
+            <SearchableSelect
               value={branch}
-              onChange={(e) => setBranch(e.target.value)}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
-              placeholder="branch name"
+              onChange={setBranch}
+              options={branches}
+              loading={loadingBranches}
+              placeholder="Search branches..."
+              loadingText="Loading branches..."
+              emptyText="No branches found"
             />
+            {(localSha || remoteSha) && (
+              <div className="mt-1.5 flex items-center gap-1.5 font-mono text-[10px] text-zinc-500">
+                <span title="Local HEAD">{localSha ?? '?'}</span>
+                <span className="text-zinc-700">/</span>
+                <span
+                  title={`origin/${branch}`}
+                  className={remoteSha && remoteSha !== localSha ? 'text-zinc-400' : 'text-zinc-600'}
+                >
+                  {loadingShas ? '…' : (remoteSha ?? 'no remote')}
+                </span>
+              </div>
+            )}
           </div>
 
           <div>

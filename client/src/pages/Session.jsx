@@ -263,7 +263,7 @@ export default function Session() {
     hasMore: hasMoreSessions,
     loadMore: loadMoreSessions,
   } = useSessionsContext();
-  const { selectedRepo, setSelectedRepo } = useRepoContext();
+  const { selectedRepo, setSelectedRepo, repos } = useRepoContext();
   const { showArchived } = useFilters();
   const { session: sessionFromHook, loading: sessionLoading } = useGetSession(short_id);
   const sessionId = sessionFromHook?.id;
@@ -282,6 +282,8 @@ export default function Session() {
   const [showMenu, setShowMenu] = useState(false);
   const [menuModelOverride, setMenuModelOverride] = useState(null);
   const [models, setModels] = useState([]);
+  const [localSha, setLocalSha] = useState(null);
+  const [remoteSha, setRemoteSha] = useState(null);
   const [pushing, setPushing] = useState(false);
   const [showPushModal, setShowPushModal] = useState(false);
   const [pushRequest, setPushRequest] = useState(null);
@@ -363,6 +365,8 @@ export default function Session() {
         setHasDiff((res.diff || '').trim().length > 0);
         setHasUncommitted(res.hasUncommitted ?? false);
         setCommitsToPush(res.commitsToPush ?? 0);
+        setLocalSha(res.localSha ?? null);
+        setRemoteSha(res.remoteSha ?? null);
       })
       .catch(() => {});
   }, [sessionId, session?.status]);
@@ -622,6 +626,17 @@ export default function Session() {
                     </button>
                   </span>
                 )}
+                {(localSha || remoteSha) && (
+                  <span className="shrink-0 font-mono text-zinc-600 text-[10px]">
+                    {localSha ?? '?'}
+                    {remoteSha !== null && (
+                      <span className={remoteSha === localSha ? 'text-zinc-700' : 'text-zinc-500'}>
+                        {' / '}
+                        {remoteSha}
+                      </span>
+                    )}
+                  </span>
+                )}
                 {session.preview_url && (
                   <span className="shrink-0 flex items-center gap-1">
                     <a
@@ -646,6 +661,23 @@ export default function Session() {
           <div className="flex items-center gap-1.5 shrink-0">
             {!isReadonly && (
               <>
+                {session?.pr_status !== 'merged' && (
+                  <button
+                    type="button"
+                    onClick={handlePush}
+                    disabled={pushing}
+                    title="Push commits"
+                    className="relative hidden sm:flex items-center gap-1 px-2 py-1 rounded border text-xs transition-colors border-zinc-700 text-zinc-400 hover:border-zinc-600 hover:text-zinc-300 disabled:opacity-50"
+                  >
+                    <Upload className="w-3 h-3" />
+                    Push
+                    {commitsToPush > 0 && (
+                      <span className="flex items-center justify-center min-w-[1rem] h-4 px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold leading-none">
+                        {commitsToPush}
+                      </span>
+                    )}
+                  </button>
+                )}
                 <button
                   onClick={handlePlanToggle}
                   title={session.plan_mode ? 'Disable Plan Mode' : 'Enable Plan Mode'}
@@ -909,22 +941,6 @@ export default function Session() {
             </div>
             {!isReadonly && session?.pr_status !== 'merged' && (
               <div className="ml-auto shrink-0 flex items-center gap-2 py-2 pl-2">
-                {(commitsToPush > 0 || hasUncommitted) && session?.status === 'completed' && (
-                  <button
-                    type="button"
-                    onClick={handlePush}
-                    disabled={pushing}
-                    className="relative flex items-center gap-1 px-2 py-1 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 border border-amber-500 rounded text-xs text-white transition-colors"
-                  >
-                    <Upload className="w-3 h-3" />
-                    Push
-                    {commitsToPush > 0 && (
-                      <span className="flex items-center justify-center min-w-[1rem] h-4 px-1 rounded-full bg-white text-amber-700 text-[10px] font-bold leading-none">
-                        {commitsToPush}
-                      </span>
-                    )}
-                  </button>
-                )}
                 <span className="text-xs text-zinc-500">Auto-push</span>
                 <button
                   type="button"
@@ -1049,6 +1065,8 @@ export default function Session() {
       {/* Task Log Modal */}
       {showPushModal && (
         <PushConfirmModal
+          sessionId={session?.id}
+          repo={repos.find((r) => r.full_name === session?.repo_full_name) ?? null}
           commitsToPush={commitsToPush}
           initialBranch={pushRequest?.branch || session?.remote_branch || session?.created_branch}
           initialForceMode={pushRequest?.forceMode || null}

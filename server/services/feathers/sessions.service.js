@@ -11,6 +11,7 @@ import {
   gitDiff,
   gitHasUncommitted,
   gitCommitsToPush,
+  gitLocalAndRemoteSha,
   gitFetch,
   gitPush,
   mergePR,
@@ -203,14 +204,30 @@ export class SessionsService extends KnexService {
           ? gitFetch(cwd, token, currentBranch).catch(() => {})
           : null,
       ]);
-      const [diff, hasUncommitted, commitsToPush] = await Promise.all([
+      const [diff, hasUncommitted, commitsToPush, { localSha, remoteSha }] = await Promise.all([
         gitDiff(cwd, session.base_branch),
         gitHasUncommitted(cwd),
         gitCommitsToPush(cwd),
+        gitLocalAndRemoteSha(cwd),
       ]);
-      return { diff, hasUncommitted, commitsToPush };
+      return { diff, hasUncommitted, commitsToPush, localSha, remoteSha };
     } catch (err) {
       return { diff: '', hasUncommitted: false, error: err.message };
+    }
+  }
+
+  async shas(data, params) {
+    const session = params.resolvedSession;
+    if (!session?.worktree_path) return { localSha: null, remoteSha: null };
+    const cwd = resolveDataDirRelativePath(session.worktree_path);
+    try {
+      const user = await this.app.service('users').get(session.user_id, {});
+      const token = getEffectiveGithubToken(user);
+      const branch = data.branch || session.remote_branch || session.created_branch;
+      if (branch) await gitFetch(cwd, token, branch).catch(() => {});
+      return await gitLocalAndRemoteSha(cwd, branch || null);
+    } catch (err) {
+      return { localSha: null, remoteSha: null, error: err.message };
     }
   }
 
@@ -645,6 +662,7 @@ export function registerSessionsService(app, path = 'sessions') {
       'commands',
       'resolvePermission',
       'diff',
+      'shas',
       'showDiff',
       'merge',
       'push',
@@ -678,6 +696,7 @@ export const sessionsHooks = {
     stop: [resolveSessionFromData],
     commands: [resolveSessionFromData],
     diff: [resolveSessionFromData],
+    shas: [resolveSessionFromData],
     showDiff: [resolveSessionFromData],
     merge: [resolveSessionFromData],
     push: [resolveSessionFromData],
