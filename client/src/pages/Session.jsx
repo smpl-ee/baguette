@@ -263,7 +263,7 @@ export default function Session() {
     hasMore: hasMoreSessions,
     loadMore: loadMoreSessions,
   } = useSessionsContext();
-  const { selectedRepo } = useRepoContext();
+  const { selectedRepo, setSelectedRepo } = useRepoContext();
   const { showArchived } = useFilters();
   const { session: sessionFromHook, loading: sessionLoading } = useGetSession(short_id);
   const sessionId = sessionFromHook?.id;
@@ -402,6 +402,16 @@ export default function Session() {
     prevSelectedRepoRef.current = selectedRepo;
     navigate('/');
   }, [selectedRepo, navigate]);
+
+  // When navigating directly to a session URL that belongs to a different repo,
+  // switch the selected repo instead of showing the wrong repo's sidebar.
+  useEffect(() => {
+    if (!sessionFromHook?.repo_full_name) return;
+    if (sessionFromHook.repo_full_name === selectedRepo) return;
+    // Update the ref first so the effect above doesn't navigate away.
+    prevSelectedRepoRef.current = sessionFromHook.repo_full_name;
+    setSelectedRepo(sessionFromHook.repo_full_name);
+  }, [sessionFromHook?.repo_full_name, selectedRepo, setSelectedRepo]);
 
   useEffect(() => {
     if (!showMenu) {
