@@ -7,6 +7,7 @@ import { useSessionsContext } from '../context/SessionsContext.jsx';
 import { formatRelativeTime } from '../utils/dates.js';
 import ArchiveSession from './ArchiveSession.jsx';
 import { parseModelField } from '../utils/models.js';
+import GithubIcon from './GithubIcon.jsx';
 
 function StatusIcon({ status }) {
   switch (status) {
@@ -27,7 +28,7 @@ function StatusIcon({ status }) {
 
 const STOPPABLE_STATUSES = new Set(['running']);
 
-export default function SessionCard({ session }) {
+export default function SessionCard({ session, showRepo = false }) {
   const navigate = useNavigate();
   const { pendingApprovals, dismissedApprovalIds, reopenApproval } = useSessionsContext();
   const isArchived = !!session.archived_at;
@@ -70,6 +71,12 @@ export default function SessionCard({ session }) {
           <span className="text-white font-medium text-sm truncate">
             {session.label || session.repo_full_name}
           </span>
+          {showRepo && session.label && session.repo_full_name && (
+            <span className="flex items-center gap-1 shrink-0 text-xs text-zinc-500">
+              <GithubIcon className="w-3 h-3" />
+              {session.repo_full_name.split('/')[1] ?? session.repo_full_name}
+            </span>
+          )}
           {session.created_at && (
             <span className="text-zinc-600 text-xs">{formatRelativeTime(session.created_at)}</span>
           )}

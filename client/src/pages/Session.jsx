@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { useSessionsContext } from '../context/SessionsContext.jsx';
 import { useFilters } from '../context/FilterContext.jsx';
-import { useRepoContext } from '../context/RepoContext.jsx';
+import { useRepoContext, ALL_REPOS } from '../context/RepoContext.jsx';
 import { useAuth } from '../hooks/useAuth.jsx';
 import toast from 'react-hot-toast';
 import { toastError } from '../utils/toastError.jsx';
@@ -408,17 +408,20 @@ export default function Session() {
     navigate('/');
   }, [selectedRepo, navigate]);
 
-  // When navigating directly to a session URL that belongs to a different repo,
-  // switch the selected repo instead of showing the wrong repo's sidebar.
-  // Use selectedRepoRef (not selectedRepo) so this effect only fires when the
-  // session changes — not when the user manually picks a repo in the picker.
+  // When navigating to a new session URL, sync the repo picker to that session's
+  // repo. Tied to short_id (not sessionRepo) so user changing the picker never
+  // triggers this — only navigating to a different session does. This also means
+  // clicking a session from "All sessions" correctly switches to that session's repo.
   const sessionRepo = sessionFromHook?.repo_full_name;
+  const prevShortIdRef = useRef(null);
   useEffect(() => {
     if (!sessionRepo) return;
+    if (prevShortIdRef.current === short_id) return;
+    prevShortIdRef.current = short_id;
     if (sessionRepo === selectedRepoRef.current) return;
     prevSelectedRepoRef.current = sessionRepo;
     setSelectedRepo(sessionRepo);
-  }, [sessionRepo, setSelectedRepo]);
+  }, [short_id, sessionRepo, setSelectedRepo]);
 
   useEffect(() => {
     if (!showMenu) {
@@ -536,7 +539,7 @@ export default function Session() {
           (s) =>
             s.short_id !== short_id &&
             !s.archived_at &&
-            (!selectedRepo || s.repo_full_name === selectedRepo)
+            (!selectedRepo || selectedRepo === ALL_REPOS || s.repo_full_name === selectedRepo)
         );
         navigate(firstSession ? `/session/${firstSession.short_id}` : '/');
       }
@@ -886,7 +889,7 @@ export default function Session() {
               ...sessions.filter(
                 (s) =>
                   (showArchived || !s.archived_at) &&
-                  (!selectedRepo || s.repo_full_name === selectedRepo)
+                  (!selectedRepo || selectedRepo === ALL_REPOS || s.repo_full_name === selectedRepo)
               ),
             ].map((s) => (
               <MiniSessionEntry
@@ -899,7 +902,7 @@ export default function Session() {
                     (x) =>
                       x.short_id !== short_id &&
                       !x.archived_at &&
-                      (!selectedRepo || x.repo_full_name === selectedRepo)
+                      (!selectedRepo || selectedRepo === ALL_REPOS || x.repo_full_name === selectedRepo)
                   );
                   navigate(firstSession ? `/session/${firstSession.short_id}` : '/');
                 }}

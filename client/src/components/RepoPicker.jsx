@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronDown, Plus } from 'lucide-react';
+import { ChevronDown, Plus, Layers } from 'lucide-react';
 import GithubIcon from './GithubIcon.jsx';
-import { useRepoContext } from '../context/RepoContext.jsx';
+import { useRepoContext, ALL_REPOS } from '../context/RepoContext.jsx';
 import { repoDisplayName, isLocalRepo } from '../utils/repoDisplayName.js';
 
 export default function RepoPicker({ className = '' }) {
@@ -19,7 +19,8 @@ export default function RepoPicker({ className = '' }) {
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
 
-  const label = selectedRepo ? repoDisplayName(selectedRepo) : 'Select repo';
+  const isAllSessions = selectedRepo === ALL_REPOS;
+  const label = isAllSessions ? 'All sessions' : selectedRepo ? repoDisplayName(selectedRepo) : 'Select repo';
 
   return (
     <div className={`relative ${className}`} ref={ref}>
@@ -27,12 +28,27 @@ export default function RepoPicker({ className = '' }) {
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors bg-zinc-800 hover:bg-zinc-700 border border-zinc-600 text-zinc-200 hover:text-white shadow-sm"
       >
-        <GithubIcon className="w-4 h-4 shrink-0" />
+        {isAllSessions ? <Layers className="w-4 h-4 shrink-0" /> : <GithubIcon className="w-4 h-4 shrink-0" />}
         <span className="max-w-32 truncate">{label}</span>
         <ChevronDown className="w-3.5 h-3.5 shrink-0 text-zinc-400" />
       </button>
       {open && (
         <div className="absolute left-0 top-full mt-1 w-56 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50 py-1">
+          <button
+            onClick={() => {
+              setSelectedRepo(ALL_REPOS);
+              setOpen(false);
+            }}
+            className={`w-full text-left flex items-center gap-2 px-3 py-2 text-sm transition-colors ${
+              isAllSessions
+                ? 'text-white bg-zinc-800'
+                : 'text-zinc-400 hover:text-white hover:bg-zinc-800/50'
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5 shrink-0" />
+            All sessions
+          </button>
+          {repos.length > 0 && <div className="border-t border-zinc-700 my-1" />}
           {repos.map((r) => (
             <button
               key={r.full_name}

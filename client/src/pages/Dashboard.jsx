@@ -3,7 +3,7 @@ import { Loader2, Archive } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { sessionsService } from '../feathers.js';
 import { useSessionsContext } from '../context/SessionsContext.jsx';
-import { useRepoContext } from '../context/RepoContext.jsx';
+import { useRepoContext, ALL_REPOS } from '../context/RepoContext.jsx';
 import SessionCard from '../components/SessionCard.jsx';
 import BuilderForm from '../components/BuilderForm.jsx';
 import { apiFetch } from '../api.js';
@@ -238,54 +238,58 @@ export default function Dashboard() {
     }
   };
 
+  const isAllSessions = selectedRepo === ALL_REPOS;
+  const repoFilter = isAllSessions ? null : selectedRepo;
   const filteredSessions = sessions
     .filter((s) => showArchived || !s.archived_at)
-    .filter((s) => !selectedRepo || s.repo_full_name === selectedRepo);
+    .filter((s) => !repoFilter || s.repo_full_name === repoFilter);
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6 sm:py-8">
       <h1 className="text-base font-semibold text-white mb-5 font-display">Sessions</h1>
 
-      <div className="relative bg-zinc-900 border border-zinc-800 rounded-lg p-4 sm:p-6 mb-4 sm:mb-6">
-        {creating && (
-          <div className="absolute inset-0 z-20 flex items-center justify-center bg-zinc-950/80 backdrop-blur-sm">
-            <div className="flex flex-col items-center gap-3">
-              <Loader2 className="w-10 h-10 animate-spin text-amber-400" />
-              <p className="text-sm font-medium text-zinc-100">
-                Starting your agent session…
-              </p>
-              <p className="text-xs text-zinc-400">This usually only takes a few seconds.</p>
+      {!isAllSessions && (
+        <div className="relative bg-zinc-900 border border-zinc-800 rounded-lg p-4 sm:p-6 mb-4 sm:mb-6">
+          {creating && (
+            <div className="absolute inset-0 z-20 flex items-center justify-center bg-zinc-950/80 backdrop-blur-sm">
+              <div className="flex flex-col items-center gap-3">
+                <Loader2 className="w-10 h-10 animate-spin text-amber-400" />
+                <p className="text-sm font-medium text-zinc-100">
+                  Starting your agent session…
+                </p>
+                <p className="text-xs text-zinc-400">This usually only takes a few seconds.</p>
+              </div>
             </div>
-          </div>
-        )}
-        {createError && (
-          <div className="mb-4 bg-red-900/30 border border-red-700 rounded-md px-3 sm:px-4 py-3 text-sm text-red-300">
-            <div className="flex items-start justify-between gap-2">
-              <p className="break-all">{createError}</p>
-              <button
-                onClick={() => setCreateError(null)}
-                className="text-red-400 hover:text-red-200 shrink-0 text-lg leading-none"
-              >
-                &times;
-              </button>
+          )}
+          {createError && (
+            <div className="mb-4 bg-red-900/30 border border-red-700 rounded-md px-3 sm:px-4 py-3 text-sm text-red-300">
+              <div className="flex items-start justify-between gap-2">
+                <p className="break-all">{createError}</p>
+                <button
+                  onClick={() => setCreateError(null)}
+                  className="text-red-400 hover:text-red-200 shrink-0 text-lg leading-none"
+                >
+                  &times;
+                </button>
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {!loadingRepos && repos.length === 0 ? (
-          <NoReposCard />
-        ) : (
-          <BuilderForm
-            key={`builder-${formKey}`}
-            onSubmit={handleCreate}
-            loading={creating}
-            repoFullName={selectedRepo}
-            defaultPrompt={initPrompt || ''}
-          />
-        )}
-      </div>
+          {!loadingRepos && repos.length === 0 ? (
+            <NoReposCard />
+          ) : (
+            <BuilderForm
+              key={`builder-${formKey}`}
+              onSubmit={handleCreate}
+              loading={creating}
+              repoFullName={selectedRepo}
+              defaultPrompt={initPrompt || ''}
+            />
+          )}
+        </div>
+      )}
 
-      <UsageGraph repoFilter={selectedRepo} />
+      <UsageGraph repoFilter={repoFilter} />
 
       <div className="flex justify-end mb-3">
         <button
@@ -317,10 +321,10 @@ export default function Dashboard() {
             <p className="text-zinc-500 text-sm">No sessions yet. Create one to get started.</p>
           </div>
         )}
-        {!loading && filteredSessions.length === 0 && sessions.length > 0 && selectedRepo && (
+        {!loading && filteredSessions.length === 0 && sessions.length > 0 && repoFilter && (
           <div className="flex flex-col items-center py-12 gap-2 opacity-50">
             <p className="text-zinc-500 text-sm">
-              No sessions for {selectedRepo.split('/')[1] ?? selectedRepo}.
+              No sessions for {repoFilter.split('/')[1] ?? repoFilter}.
             </p>
           </div>
         )}

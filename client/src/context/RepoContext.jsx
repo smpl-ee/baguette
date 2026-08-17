@@ -4,6 +4,8 @@ import { usePersistentState } from '../hooks/usePersistentState.js';
 import { useSessionsContext } from './SessionsContext.jsx';
 import { useAuth } from '../hooks/useAuth.jsx';
 
+export const ALL_REPOS = '__all__';
+
 const RepoContext = createContext(null);
 
 export function RepoProvider({ children }) {
@@ -15,12 +17,13 @@ export function RepoProvider({ children }) {
 
   // Drop persisted selection if that repo was removed / is no longer available
   useEffect(() => {
-    if (loading || !selectedRepo) return;
+    if (loading || !selectedRepo || selectedRepo === ALL_REPOS) return;
     const exists = repos.some((r) => r.full_name === selectedRepo);
     if (!exists) setSelectedRepo(null);
   }, [loading, repos, selectedRepo, setSelectedRepo]);
 
   // Auto-select when none chosen (incl. after stale selection cleared)
+  // ALL_REPOS is truthy so it won't trigger this effect
   useEffect(() => {
     if (selectedRepo) return;
     if (loading || repos.length === 0) return;
