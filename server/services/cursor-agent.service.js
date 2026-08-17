@@ -1,4 +1,4 @@
-import { Agent } from '@cursor/sdk';
+import { Agent, AgentBusyError } from '@cursor/sdk';
 import { execFile } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -168,7 +168,18 @@ ${systemPrompt}`;
         sendOptions.mode = 'plan';
       }
 
-      const run = await agent.send(userText, sendOptions);
+      let run;
+      try {
+        run = await agent.send(userText, sendOptions);
+      } catch (err) {
+        if (!(err instanceof AgentBusyError)) throw err;
+        // Server restarted while a run was active. Cancel the stale run and retry once.
+        const cwd = resolveDataDirRelativePath(session.worktree_path) || '';
+        const { items } = await Agent.listRuns(agent.agentId, { cwd });
+        const stale = items.find((r) => r.status === 'running');
+        if (stale) await stale.cancel();
+        run = await agent.send(userText, sendOptions);
+      }
       sessionState.currentRun = run;
 
       const pendingToolCalls = new Map();
