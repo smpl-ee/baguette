@@ -7,7 +7,7 @@ import { useRepoContext } from '../context/RepoContext.jsx';
 import { useGetBranches } from '../hooks/useGetBranches.js';
 import { usePersistentState } from '../hooks/usePersistentState.js';
 import FileAttachmentPicker from './FileAttachmentPicker.jsx';
-import SearchableSelect from './SearchableSelect.jsx';
+import SearchableSelect from './SearchableSelect';
 import { isMobile } from '../utils/isMobile.js';
 import { variantLabel } from '../utils/models.js';
 
