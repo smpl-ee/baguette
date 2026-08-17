@@ -4,7 +4,7 @@ import { apiFetch } from '../api.js';
 import { usersService } from '../feathers.js';
 import { useAuth } from '../hooks/useAuth.jsx';
 import { usePersistentState } from '../hooks/usePersistentState.js';
-import SearchableSelect from './SearchableSelect.jsx';
+import SearchableSelect from './SearchableSelect';
 
 export default function ReviewerForm({ repoFullName, onSubmit, loading }) {
   const { user } = useAuth();

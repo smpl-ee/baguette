@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useSearchableSelectAsync } from './useSearchableSelectAsync.js';
 
 const COLOR_CLASSES = {
   amber: { ring: 'focus:ring-amber-500/50', border: 'border-amber-500/50' },
@@ -11,8 +12,14 @@ const COLOR_CLASSES = {
  * Props:
  *   value            – currently selected value (from getOptionValue)
  *   onChange(value)  – called with getOptionValue(option) on select, or '' on clear
- *   options          – array of options (strings or objects)
- *   loading          – show loading placeholder and disable input
+ *   options          – static options (ignored when getOptions is set)
+ *   getOptions       – optional async (query: string) => options; enables server-side
+ *                      search with debouncing; query is the current input (may be '').
+ *                      Should return an array; invalid rows (bad shape, duplicate keys,
+ *                      getOptionValue/getOptionLabel errors) are dropped.
+ *   getOptionsDebounceMs – debounce for getOptions when query is non-empty (default 300)
+ *   asyncRefetchKey  – when getOptions is set, changing this value refetches the open panel (e.g. org id)
+ *   loading          – external loading (e.g. parent fetching); combined with internal fetch state
  *   disabled         – disable input entirely
  *   color            – 'amber' | 'violet' (default 'amber')
  *   placeholder      – input placeholder when idle
@@ -28,6 +35,9 @@ export default function SearchableSelect({
   value,
   onChange,
   options = [],
+  getOptions,
+  getOptionsDebounceMs = 300,
+  asyncRefetchKey,
   loading = false,
   disabled = false,
   color = 'amber',
@@ -45,31 +55,60 @@ export default function SearchableSelect({
   const inputRef = useRef(null);
   const { ring, border } = COLOR_CLASSES[color] ?? COLOR_CLASSES.amber;
 
+  const {
+    fetchedOptions,
+    asyncLoading,
+    fetchForQuery,
+    debouncedFetch,
+    cancelDebouncedFetch,
+  } = useSearchableSelectAsync({
+    getOptions,
+    getOptionValue,
+    getOptionLabel,
+    getOptionsDebounceMs,
+    asyncRefetchKey,
+    search,
+  });
+
+  const primeAsyncEmptyQuery = useCallback(() => {
+    if (!getOptions) return;
+    cancelDebouncedFetch();
+    void fetchForQuery('');
+  }, [getOptions, cancelDebouncedFetch, fetchForQuery]);
+
+  const listSource = getOptions ? fetchedOptions : options;
+  /** Parent-driven loading only — never tie this to async fetches: disabling the input steals focus. */
+  const inputDisabled = disabled || loading;
+  const showLoadingPlaceholder = loading || (getOptions && asyncLoading);
+
+  const filteredOptions = getOptions
+    ? listSource
+    : listSource.filter(
+        (o) => !search || getOptionLabel(o).toLowerCase().includes(search.toLowerCase())
+      );
+
+  const selectedItem = value ? listSource.find((o) => getOptionValue(o) === value) : null;
+
   useEffect(() => {
     if (search === null) return;
 
     const onMouseDown = (e) => {
       if (rootRef.current && !rootRef.current.contains(e.target)) {
         setSearch(null);
+        cancelDebouncedFetch();
       }
     };
 
     document.addEventListener('mousedown', onMouseDown);
     return () => document.removeEventListener('mousedown', onMouseDown);
-  }, [search]);
-
-  const selectedItem = value ? options.find((o) => getOptionValue(o) === value) : null;
-
-  const filteredOptions = options.filter(
-    (o) => !search || getOptionLabel(o).toLowerCase().includes(search.toLowerCase())
-  );
+  }, [search, cancelDebouncedFetch]);
 
   const inputPlaceholder =
     disabled && disabledText
       ? disabledText
-      : loading
+      : showLoadingPlaceholder
         ? loadingText
-        : options.length === 0
+        : listSource.length === 0
           ? emptyText
           : placeholder;
 
@@ -84,7 +123,18 @@ export default function SearchableSelect({
 
   const openSearchAndFocus = () => {
     setSearch('');
+    primeAsyncEmptyQuery();
     requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
+  const handleInputChange = (next) => {
+    setSearch(next);
+    if (!getOptions) return;
+    if (next === '') {
+      primeAsyncEmptyQuery();
+    } else {
+      debouncedFetch(next);
+    }
   };
 
   return (
@@ -94,12 +144,20 @@ export default function SearchableSelect({
           ref={inputRef}
           type="text"
           value={search ?? ''}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => handleInputChange(e.target.value)}
+          onFocus={() => {
+            if (search !== null) return;
+            setSearch('');
+            primeAsyncEmptyQuery();
+          }}
           onClick={() => {
-            if (search === null) setSearch('');
+            if (search === null) {
+              setSearch('');
+              primeAsyncEmptyQuery();
+            }
           }}
           placeholder={inputPlaceholder}
-          disabled={disabled || loading}
+          disabled={inputDisabled}
           className={`w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2.5 text-sm text-white placeholder-zinc-500 focus:border-transparent focus:outline-none focus:ring-2 ${ring} disabled:opacity-50 ${
             showClosedSelected
               ? 'absolute inset-0 z-0 min-h-10.5 opacity-0 pointer-events-none'
@@ -138,6 +196,7 @@ export default function SearchableSelect({
               onClick={() => {
                 onChange(getOptionValue(o));
                 setSearch(null);
+                cancelDebouncedFetch();
               }}
               className="w-full text-left px-3 py-2.5 text-sm text-white hover:bg-zinc-700 transition-colors"
             >
