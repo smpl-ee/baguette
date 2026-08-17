@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { X, Upload, Pencil, AlertTriangle } from 'lucide-react';
-import SearchableSelect from './SearchableSelect.jsx';
+import SearchableSelect from './SearchableSelect/index.jsx';
 import { useGetBranches } from '../hooks/useGetBranches.js';
 import { sessionsService } from '../feathers.js';
 

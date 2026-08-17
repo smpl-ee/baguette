@@ -6,7 +6,7 @@ import { usersService, reposService, userReposService } from '../feathers.js';
 import { useAuth } from '../hooks/useAuth.jsx';
 import { requestNotificationPermission } from '../utils/notifications.js';
 import { useRepoContext } from '../context/RepoContext.jsx';
-import SearchableSelect from '../components/SearchableSelect.jsx';
+import SearchableSelect from '../components/SearchableSelect/index.jsx';
 import { repoDisplayName, isLocalRepo } from '../utils/repoDisplayName.js';
 import { variantLabel } from '../utils/models.js';
 
