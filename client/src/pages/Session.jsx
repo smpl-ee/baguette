@@ -276,8 +276,7 @@ export default function Session() {
   const [showTasks, setShowTasks] = useState(false);
   const [showSidebar, setShowSidebar] = useState(null);
   const [diffFiles, setDiffFiles] = useState([]);
-  const [_hasDiff, setHasDiff] = useState(null);
-  const [hasUncommitted, setHasUncommitted] = useState(null);
+
   const [commitsToPush, setCommitsToPush] = useState(0);
   const [showMenu, setShowMenu] = useState(false);
   const [menuModelOverride, setMenuModelOverride] = useState(null);
@@ -362,8 +361,6 @@ export default function Session() {
     sessionsService
       .diff(sessionId)
       .then((res) => {
-        setHasDiff((res.diff || '').trim().length > 0);
-        setHasUncommitted(res.hasUncommitted ?? false);
         setCommitsToPush(res.commitsToPush ?? 0);
         setLocalSha(res.localSha ?? null);
         setRemoteSha(res.remoteSha ?? null);
