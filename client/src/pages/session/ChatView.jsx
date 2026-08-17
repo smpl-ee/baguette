@@ -295,6 +295,7 @@ export default function ChatView({
               isLatestMessage={i === displayMessages.length - 1}
               worktreePath={session.absolute_worktree_path}
               sessionId={session.id}
+              agentName={session.agent_sdk === 'cursor' ? 'Cursor' : 'Claude'}
             />
           ))}
           {!readonly &&
@@ -455,7 +456,7 @@ export default function ChatView({
                   value={input}
                   onChange={handleChatInputChange}
                   onKeyDown={handleChatKeyDown}
-                  placeholder="Message Claude..."
+                  placeholder={`Message ${session.agent_sdk === 'cursor' ? 'Cursor' : 'Claude'}...`}
                   className="block w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 sm:px-4 py-2.5 pr-6 text-sm text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 disabled:opacity-50 disabled:cursor-not-allowed resize-none overflow-y-auto"
                   style={{ maxHeight: '88px' }}
                 />

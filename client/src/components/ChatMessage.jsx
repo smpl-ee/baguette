@@ -30,7 +30,7 @@ function CopyButton({ text }) {
   );
 }
 
-export default function ChatMessage({ message, isLatestMessage, worktreePath, sessionId }) {
+export default function ChatMessage({ message, isLatestMessage, worktreePath, sessionId, agentName = 'Claude' }) {
   if (message.type === 'assistant' && message.message?.content) {
     return (
       <div className="space-y-2">
@@ -39,7 +39,7 @@ export default function ChatMessage({ message, isLatestMessage, worktreePath, se
             return (
               <div key={i} className="group bg-zinc-900 rounded-lg p-3 sm:p-4 border border-zinc-800">
                 <div className="text-xs text-indigo-400 mb-1 font-medium flex items-center justify-between">
-                  <span>Claude</span>
+                  <span>{agentName}</span>
                   <CopyButton text={block.text} />
                 </div>
                 <MarkdownContent>{block.text}</MarkdownContent>

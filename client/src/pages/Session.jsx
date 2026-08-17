@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
 import {
   ChevronLeft,
@@ -397,6 +397,11 @@ export default function Session() {
   }, [sessionLoading, short_id, sessionFromHook, navigate]);
 
   const prevSelectedRepoRef = useRef(selectedRepo);
+  const selectedRepoRef = useRef(selectedRepo);
+  useLayoutEffect(() => {
+    selectedRepoRef.current = selectedRepo;
+  }, [selectedRepo]);
+
   useEffect(() => {
     if (prevSelectedRepoRef.current === selectedRepo) return;
     prevSelectedRepoRef.current = selectedRepo;
@@ -405,13 +410,15 @@ export default function Session() {
 
   // When navigating directly to a session URL that belongs to a different repo,
   // switch the selected repo instead of showing the wrong repo's sidebar.
+  // Use selectedRepoRef (not selectedRepo) so this effect only fires when the
+  // session changes — not when the user manually picks a repo in the picker.
+  const sessionRepo = sessionFromHook?.repo_full_name;
   useEffect(() => {
-    if (!sessionFromHook?.repo_full_name) return;
-    if (sessionFromHook.repo_full_name === selectedRepo) return;
-    // Update the ref first so the effect above doesn't navigate away.
-    prevSelectedRepoRef.current = sessionFromHook.repo_full_name;
-    setSelectedRepo(sessionFromHook.repo_full_name);
-  }, [sessionFromHook?.repo_full_name, selectedRepo, setSelectedRepo]);
+    if (!sessionRepo) return;
+    if (sessionRepo === selectedRepoRef.current) return;
+    prevSelectedRepoRef.current = sessionRepo;
+    setSelectedRepo(sessionRepo);
+  }, [sessionRepo, setSelectedRepo]);
 
   useEffect(() => {
     if (!showMenu) {
