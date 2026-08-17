@@ -538,6 +538,62 @@ describe('Sessions service - find, get, create', (hooks) => {
     });
   });
 
+  // ── preview_url visibility ─────────────────────────────────────────────────
+
+  describe('preview_url', () => {
+    beforeEach(async () => {
+      // sessId1 already has worktree_path=null; give it one for preview tests
+      await db('sessions').where({ id: sessId1 }).update({ worktree_path: '/tmp/wt-preview' });
+    });
+
+    it('is set when baguette config has a webserver block', async () => {
+      loadBaguetteConfig.mockResolvedValue({ webserver: { command: 'node server.js', ports: [3000] } });
+
+      const session = await app.service('sessions').get(sessId1, params({ id: userId1 }));
+
+      expect(session.preview_url).toBeTruthy();
+      expect(session.preview_url).toContain('/preview?session=a1b2c3');
+    });
+
+    it('is set when baguette config has a services block (not just webserver)', async () => {
+      loadBaguetteConfig.mockResolvedValue({
+        services: { api: { task: 'server' } },
+        'session': { tasks: { server: { run: 'node api.js', ports: [4000] } } },
+      });
+
+      const session = await app.service('sessions').get(sessId1, params({ id: userId1 }));
+
+      expect(session.preview_url).toBeTruthy();
+      expect(session.preview_url).toContain('/preview?session=a1b2c3');
+    });
+
+    it('is false when baguette config has neither webserver nor services', async () => {
+      loadBaguetteConfig.mockResolvedValue({ session: { tasks: { test: { run: 'npm test' } } } });
+
+      const session = await app.service('sessions').get(sessId1, params({ id: userId1 }));
+
+      expect(session.preview_url).toBeFalsy();
+    });
+
+    it('is false when config is null', async () => {
+      loadBaguetteConfig.mockResolvedValue(null);
+
+      const session = await app.service('sessions').get(sessId1, params({ id: userId1 }));
+
+      expect(session.preview_url).toBeFalsy();
+    });
+
+    it('is false when session has no worktree_path', async () => {
+      await db('sessions').where({ id: sessId2 }).update({ worktree_path: null });
+      loadBaguetteConfig.mockResolvedValue({ webserver: { command: 'node server.js' } });
+
+      const session = await app.service('sessions').get(sessId2, params({ id: userId2 }));
+
+      expect(session.preview_url).toBeFalsy();
+      expect(loadBaguetteConfig).not.toHaveBeenCalled();
+    });
+  });
+
   // ── patch ──────────────────────────────────────────────────────────────────
 
   describe('patch', () => {

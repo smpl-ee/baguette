@@ -590,12 +590,12 @@ async function withHasWebserver(session) {
     ? await fs.realpath(resolvedPath).catch(() => resolvedPath)
     : resolvedPath;
   const config = session.worktree_path ? await loadBaguetteConfig(session.worktree_path) : null;
-  const hasWebserver = !!config?.webserver;
+  const hasPreview = !!(config?.webserver || config?.services);
   return {
     ...session,
     absolute_worktree_path: absoluteWorktreePath ?? null,
-    preview_url: hasWebserver && getPreviewAuthUri(session.short_id),
-    is_preview_public: hasWebserver ? !!session.is_preview_public : false,
+    preview_url: hasPreview && getPreviewAuthUri(session.short_id),
+    is_preview_public: hasPreview ? !!session.is_preview_public : false,
   };
 }
 
