@@ -172,7 +172,9 @@ ${systemPrompt}`;
       try {
         run = await agent.send(userText, sendOptions);
       } catch (err) {
-        if (!(err instanceof AgentBusyError)) throw err;
+        const isActiveRunError =
+          err instanceof AgentBusyError || err?.message?.includes('already has active run');
+        if (!isActiveRunError) throw err;
         // Server restarted while a run was active. Cancel the stale run and retry once.
         const cwd = resolveDataDirRelativePath(session.worktree_path) || '';
         const { items } = await Agent.listRuns(agent.agentId, { cwd });
