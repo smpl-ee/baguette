@@ -27,17 +27,34 @@ export function verifyPreviewToken(token) {
 }
 
 const SESSION_PREFIX = 'session-';
-/** Returns the preview subdomain URL for a session, e.g. https://abc123.example.com/ */
+
+function buildSessionHostname(base, suffix) {
+  return base.startsWith('www.') ? `${suffix}.${base.slice(4)}` : `${suffix}.${base}`;
+}
+
+/** Returns the preview subdomain URL for a session (portal or single-service). e.g. https://session-abc123.example.com/ */
 export function getPreviewHost(shortId) {
   const hasScheme = /^https?:\/\//.test(PUBLIC_API_HOST);
   const url = new URL(hasScheme ? PUBLIC_API_HOST : `https://${PUBLIC_API_HOST}`);
-  url.hostname = url.hostname.startsWith('www.')
-    ? `${SESSION_PREFIX}${shortId}.${url.hostname.slice(4)}`
-    : `${SESSION_PREFIX}${shortId}.${url.hostname}`;
+  url.hostname = buildSessionHostname(url.hostname, `${SESSION_PREFIX}${shortId}`);
   return url.toString();
 }
 
+/** Returns the preview subdomain URL for a named service. e.g. https://session-abc123-api.example.com/ */
+export function getServicePreviewHost(shortId, serviceName) {
+  const hasScheme = /^https?:\/\//.test(PUBLIC_API_HOST);
+  const url = new URL(hasScheme ? PUBLIC_API_HOST : `https://${PUBLIC_API_HOST}`);
+  url.hostname = buildSessionHostname(url.hostname, `${SESSION_PREFIX}${shortId}-${serviceName}`);
+  return url.toString();
+}
+
+/**
+ * Extract session shortId (and optional service name) from a Host header.
+ * Returns { shortId, serviceName } or null if not a session subdomain.
+ * serviceName is null for the portal / single-service subdomain.
+ */
 export function extractSessionIdFromHost(host) {
-  const match = host.match(new RegExp(`^${SESSION_PREFIX}([a-f0-9]{4,})\\.`));
-  return match ? match[1] : null;
+  const match = host.match(new RegExp(`^${SESSION_PREFIX}([a-f0-9]{4,})(?:-([a-z0-9][a-z0-9-]*))?\\.`));
+  if (!match) return null;
+  return { shortId: match[1], serviceName: match[2] ?? null };
 }

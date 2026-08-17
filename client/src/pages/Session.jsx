@@ -276,7 +276,6 @@ export default function Session() {
   const [showTasks, setShowTasks] = useState(false);
   const [showSidebar, setShowSidebar] = useState(null);
   const [diffFiles, setDiffFiles] = useState([]);
-
   const [commitsToPush, setCommitsToPush] = useState(0);
   const [showMenu, setShowMenu] = useState(false);
   const [menuModelOverride, setMenuModelOverride] = useState(null);

@@ -1,5 +1,14 @@
 # Baguette – Claude Code Notes
 
+## Before committing
+
+Run tests and lint — both must pass:
+
+```
+pnpm test
+pnpm run lint
+```
+
 ## API routes: prefer Feathers services over Express routes
 
 New API endpoints should be implemented as **Feathers services** in `server/services/feathers/`, not as Express routers in `server/routes/`. Feathers services integrate with auth hooks (`requireUser`), the socket.io transport, and the client-side `feathers.js` service registry automatically.

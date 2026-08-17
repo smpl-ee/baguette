@@ -72,9 +72,14 @@ config:
         run: <shell command>
         ports: [ENV_VAR_NAME, ...]       # Optional: env vars assigned free ports
         depends-on: [<other-task-key>]   # Optional: tasks to start first
+  # Use one of webserver OR services — they are mutually exclusive.
   webserver:
     task: <task-key>       # Reference a task from session.tasks
     expose: ENV_VAR        # Which port env var users access in the browser
+  services:                # Multi-service: each gets its own subdomain
+    <service-name>:
+      task: <task-key>
+      expose: ENV_VAR
 ```
 
 ## `session` block
@@ -85,11 +90,12 @@ Environment variables injected into all session tasks (init, cleanup, commands, 
 
 Supports placeholders:
 
-| Placeholder                          | Description                                              |
-| ------------------------------------ | -------------------------------------------------------- |
-| `${{ baguette.secrets.KEY }}`        | Secret stored in Settings > Secrets                      |
-| `${{ baguette.session.short_id }}`   | Unique 4-character hex identifier for this session       |
-| `${{ baguette.session.public_uri }}` | Public URL where Baguette proxies this session's preview |
+| Placeholder                                    | Description                                                        |
+| ---------------------------------------------- | ------------------------------------------------------------------ |
+| `${{ baguette.secrets.KEY }}`                  | Secret stored in Settings > Secrets                                |
+| `${{ baguette.session.short_id }}`             | Unique 4-character hex identifier for this session                 |
+| `${{ baguette.session.public_uri }}`           | Public URL of the webserver (or portal URL for multi-service)      |
+| `${{ baguette.services.<name>.public_uri }}`   | Public URL of a specific named service (multi-service only)        |
 
 ### `init`
 
@@ -147,6 +153,86 @@ ${{ baguette.tasks.<task-key>.<PORT_ENV_VAR> }}
 For example, if `dev-server` has `ports: [VITE_PORT]` and is allocated port 54321, then `${{ baguette.tasks.dev-server.VITE_PORT }}` resolves to `54321`.
 
 Circular dependencies are detected and rejected with an error.
+
+## `services` block (multi-service preview)
+
+Use `services` instead of `webserver` when the project has **multiple services that each need their own independent public URL** — the primary case is a mobile app (e.g., Expo/React Native) whose runtime directly calls an API backend. Each service gets its own subdomain `session-<id>-<name>.<domain>`. A portal page at `session-<id>.<domain>` lists all services with live status and logs.
+
+> **Do NOT use `services`** just because a project has a frontend and a backend: if the frontend proxies API calls via Vite's `proxy` config, Next.js rewrites, etc., a single `webserver` entry is correct.
+
+`services` and `webserver` are mutually exclusive.
+
+```yaml
+config:
+  session:
+    tasks:
+      frontend:
+        run: pnpm dev --port $PORT --host 127.0.0.1
+        ports: [PORT]
+      api:
+        run: node server.js --port $API_PORT
+        ports: [API_PORT]
+  services:
+    frontend:
+      task: frontend
+      expose: PORT
+    api:
+      task: api
+      expose: API_PORT
+```
+
+### Service URL placeholders
+
+Each service gets a `${{ baguette.services.<name>.public_uri }}` placeholder you can use in `session.env`:
+
+```yaml
+session:
+  env:
+    EXPO_PUBLIC_API_URL: '${{ baguette.services.api.public_uri }}'
+    PUBLIC_HOST: '${{ baguette.services.api.public_uri }}'
+```
+
+- Service names must be lowercase alphanumeric + hyphens (e.g. `api`, `expo`, `web-app`).
+- `${{ baguette.session.public_uri }}` still works and points to the portal URL.
+
+### Expo + API backend example
+
+Expo needs to call an API backend. The Expo metro bundler bakes the API URL into the JS bundle at startup — so the mobile device calls a real public URL, not localhost. Each must have its own subdomain:
+
+```yaml
+config:
+  session:
+    env:
+      DATABASE_URL: 'postgres://postgres:postgres@postgres:5432/app_${{ baguette.session.short_id }}'
+      EXPO_PUBLIC_API_URL: '${{ baguette.services.api.public_uri }}'
+      PUBLIC_HOST: '${{ baguette.services.api.public_uri }}'
+    init: |
+      pnpm install
+      pnpm --filter api run db:migrate
+    cleanup: |
+      pnpm --filter api run db:drop
+    tasks:
+      api:
+        run: pnpm --filter api run dev --port $API_PORT --host 127.0.0.1
+        ports: [API_PORT]
+      expo:
+        run: pnpm --filter expo run start --port $EXPO_PORT --host 127.0.0.1
+        ports: [EXPO_PORT]
+        depends-on: [api]
+  services:
+    api:
+      task: api
+      expose: API_PORT
+    expo:
+      task: expo
+      expose: EXPO_PORT
+```
+
+- `depends-on: [api]` ensures the API is listening before Expo starts.
+- The portal at `session-<shortId>.<domain>` shows both services with status and logs.
+- Opening `session-<shortId>-expo.<domain>` shows the Expo dev tools; `session-<shortId>-api.<domain>` is the API.
+
+---
 
 ## `webserver` block
 

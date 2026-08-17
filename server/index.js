@@ -18,7 +18,7 @@ import {
 } from './feathers.js';
 import { registerFeathersServices } from './services/feathers/index.js';
 import { DevserverProxy } from './services/devserver-proxy.js';
-import { loadBaguetteConfig } from './services/baguette-config.js';
+import { loadBaguetteConfig, resolveServicesConfig } from './services/baguette-config.js';
 import db from './db.js';
 
 const { rest } = express;
@@ -62,7 +62,11 @@ app.use(async (req, res, next) => {
   if (session == null) return next();
 
   const config = await loadBaguetteConfig(session.worktree_path);
-  if (!config?.webserver) return next();
+  // Dispatch if the config has either a webserver block (single-service) or a services block (multi-service).
+  // Short-circuit: resolveServicesConfig throws when both blocks are set, so only call it when webserver is absent.
+  const hasWebserver = !!config?.webserver;
+  const hasServices = !hasWebserver && !!(config && resolveServicesConfig(config));
+  if (!hasWebserver && !hasServices) return next();
 
   return devserverProxy.handleRequest(req, res, session, config);
 });

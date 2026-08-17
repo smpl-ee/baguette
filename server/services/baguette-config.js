@@ -27,8 +27,9 @@ export async function loadBaguetteConfig(worktreePath) {
 const PLACEHOLDER_REGEX = /\$\{\{\s*baguette\.secrets\.([A-Za-z0-9_]+)\s*\}\}/g;
 const SHORT_ID_REGEX = /\$\{\{\s*baguette\.session\.short_id\s*\}\}/g;
 const PUBLIC_URI_REGEX = /\$\{\{\s*baguette\.session\.public_uri\s*\}\}/g;
+const SERVICE_URI_REGEX = /\$\{\{\s*baguette\.services\.([A-Za-z0-9_-]+)\.public_uri\s*\}\}/g;
 
-export function interpolateEnv(template, { shortId, secrets, publicUri }) {
+export function interpolateEnv(template, { shortId, secrets, publicUri, servicesUriMap = {} }) {
   if (!template || typeof template !== 'object') return {};
 
   const result = {};
@@ -37,7 +38,8 @@ export function interpolateEnv(template, { shortId, secrets, publicUri }) {
     let interpolated = value
       .replace(PLACEHOLDER_REGEX, (_, secretKey) => secrets[secretKey] ?? '')
       .replace(SHORT_ID_REGEX, shortId ?? '')
-      .replace(PUBLIC_URI_REGEX, publicUri);
+      .replace(PUBLIC_URI_REGEX, publicUri)
+      .replace(SERVICE_URI_REGEX, (_, serviceName) => servicesUriMap[serviceName] ?? '');
     result[key] = interpolated;
   }
   return result;
@@ -166,4 +168,47 @@ export function getAvailableCommands(baguetteConfig) {
   return Object.entries(tasks)
     .filter(([_, t]) => t && typeof t.run === 'string')
     .map(([key, t]) => ({ label: key, run: t.run, ...(t.ports?.length ? { ports: t.ports } : {}) }));
+}
+
+const SERVICE_NAME_REGEX = /^[a-z0-9][a-z0-9-]*$/;
+
+/**
+ * Resolve the services block into an array of service configs.
+ * Returns `Array<{ name, command, ports, expose, taskKey }>` or null if no services block.
+ * Mutually exclusive with webserver block — throws if both are defined.
+ */
+export function resolveServicesConfig(baguetteConfig) {
+  const servicesBlock = baguetteConfig?.services;
+  if (!servicesBlock || typeof servicesBlock !== 'object') return null;
+
+  if (baguetteConfig?.webserver) {
+    throw new Error('services and webserver blocks are mutually exclusive');
+  }
+
+  const tasks = getAvailableTasks(baguetteConfig);
+  const result = [];
+
+  for (const [name, svcDef] of Object.entries(servicesBlock)) {
+    if (!SERVICE_NAME_REGEX.test(name)) {
+      throw new Error(`Invalid service name "${name}": must be lowercase alphanumeric + hyphens`);
+    }
+    if (!svcDef || typeof svcDef !== 'object') continue;
+
+    if (!svcDef.task) {
+      throw new Error(`services.${name} must specify a task`);
+    }
+    const taskDef = tasks[svcDef.task];
+    if (!taskDef) {
+      throw new Error(`services.${name}.task "${svcDef.task}" not found in session.tasks`);
+    }
+    result.push({
+      name,
+      command: taskDef.run,
+      ports: taskDef.ports || [],
+      expose: svcDef.expose,
+      taskKey: svcDef.task,
+    });
+  }
+
+  return result;
 }

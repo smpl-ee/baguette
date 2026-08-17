@@ -1,5 +1,5 @@
-import { loadBaguetteConfig, interpolateEnv } from './baguette-config.js';
-import { getPreviewHost } from './preview.js';
+import { loadBaguetteConfig, interpolateEnv, resolveServicesConfig } from './baguette-config.js';
+import { getPreviewHost, getServicePreviewHost } from './preview.js';
 
 const SERVER_ONLY_ENV_KEYS = [
   'NODE_ENV',
@@ -31,10 +31,15 @@ export async function buildTaskEnv(db, sessionId) {
   if (session?.worktree_path) {
     const baguetteConfig = await loadBaguetteConfig(session.worktree_path);
     if (baguetteConfig?.session?.env && typeof baguetteConfig.session.env === 'object') {
+      const servicesConfig = resolveServicesConfig(baguetteConfig);
+      const servicesUriMap = servicesConfig
+        ? Object.fromEntries(servicesConfig.map((s) => [s.name, getServicePreviewHost(session.short_id, s.name)]))
+        : {};
       sessionEnv = interpolateEnv(baguetteConfig.session.env, {
         shortId: session.short_id,
         secrets,
         publicUri: getPreviewHost(session.short_id),
+        servicesUriMap,
       });
     }
   }
