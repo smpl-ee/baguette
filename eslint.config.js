@@ -14,6 +14,9 @@ export default [
       'dist/**',
       '.data/**',
     ],
+  },
+
+  {
     rules: {
       'no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
       'no-console': 'error',

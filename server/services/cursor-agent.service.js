@@ -266,7 +266,7 @@ ${systemPrompt}`;
           }
           if (status === 'ERROR' || status === 'CANCELLED' || status === 'EXPIRED') {
             logger.warn({ sessionId, status }, 'cursor-agent received terminal status');
-            if (status === 'EXPIRED') {
+            if (status === 'EXPIRED' || status === 'ERROR') {
               // Clear the stale agent ID so the next send creates a fresh conversation
               await this.app.get('db')('sessions').where({ id: session.id }).update({ cursor_agent_id: null });
             }
@@ -274,7 +274,7 @@ ${systemPrompt}`;
               status === 'EXPIRED'
                 ? 'Cursor agent conversation expired. Send your message again to continue in a fresh conversation.'
                 : status === 'ERROR'
-                  ? `Cursor agent encountered an error.${sdkMsg.error ? ` ${sdkMsg.error}` : ''}`
+                  ? `Cursor agent encountered an error.${sdkMsg.error ? ` ${sdkMsg.error}` : ''} Send your message again to continue in a fresh conversation.`
                   : 'Cursor agent was cancelled.';
             await this.app
               .service('sessions')

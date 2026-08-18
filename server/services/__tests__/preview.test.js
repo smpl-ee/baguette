@@ -2,7 +2,7 @@
  * Unit tests for preview token signing/verification, host extraction, and URL helpers.
  * Also covers the portal auth-URL construction that was previously double-slashing.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 // Set env before importing modules that read it at load time
 process.env.ENCRYPTION_KEY = 'test-encryption-key-at-least-32-chars-long!!';
