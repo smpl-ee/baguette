@@ -1,10 +1,10 @@
-import { Agent, AgentBusyError } from '@cursor/sdk';
+import { Agent, AgentBusyError, AgentNotFoundError } from '@cursor/sdk';
 import { execFile } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import logger from '../logger.js';
-import { resolveDataDirRelativePath } from '../config.js';
+import { resolveDataDirRelativePath, DATA_DIR } from '../config.js';
 import { buildCursorCustomTools } from './baguette-mcp-server.js';
 import { buildSystemPromptAppend } from './session-prompt.js';
 
@@ -120,6 +120,9 @@ ${systemPrompt}`;
         cwd,
         settingSources: ['project'],
         customTools: buildCursorCustomTools(session, this.app),
+        // Store the SDK's SQLite state under the persistent Baguette volume so
+        // Agent.resume() works across container/server restarts.
+        stateRoot: join(DATA_DIR, 'cursor-sdk-store'),
       },
     };
 
@@ -135,8 +138,16 @@ ${systemPrompt}`;
 
     let agent;
     if (session.cursor_agent_id) {
-      agent = await Agent.resume(session.cursor_agent_id, agentOptions);
-    } else {
+      try {
+        agent = await Agent.resume(session.cursor_agent_id, agentOptions);
+      } catch (err) {
+        if (!(err instanceof AgentNotFoundError)) throw err;
+        // Agent data was deleted or corrupted — clear the stale ID and fall through to create.
+        logger.warn({ sessionId: session.id }, 'cursor-agent: agent not found, creating fresh agent');
+        await db('sessions').where({ id: session.id }).update({ cursor_agent_id: null });
+      }
+    }
+    if (!agent) {
       // Write system prompt to .cursor/rules/baguette.mdc before creating agent
       // so Cursor picks it up via settingSources: ['project']
       await this._writeSystemPrompt(session);
