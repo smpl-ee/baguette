@@ -142,9 +142,13 @@ ${systemPrompt}`;
       try {
         agent = await Agent.resume(session.cursor_agent_id, agentOptions);
       } catch (err) {
-        if (!(err instanceof AgentNotFoundError)) throw err;
-        // Agent data was deleted or corrupted — clear the stale ID and fall through to create.
-        logger.warn({ sessionId: session.id }, 'cursor-agent: agent not found, creating fresh agent');
+        const isRecoverable =
+          err instanceof AgentNotFoundError ||
+          err?.message?.toLowerCase().includes('authentication') ||
+          err?.message?.toLowerCase().includes('unauthorized');
+        if (!isRecoverable) throw err;
+        // Agent data deleted/corrupted or auth expired — clear the stale ID and fall through to create.
+        logger.warn({ sessionId: session.id, err: err.message }, 'cursor-agent: agent resume failed, creating fresh agent');
         await db('sessions').where({ id: session.id }).update({ cursor_agent_id: null });
       }
     }
@@ -278,6 +282,11 @@ ${systemPrompt}`;
           }
           if (status === 'ERROR' || status === 'CANCELLED' || status === 'EXPIRED') {
             logger.warn({ sessionId, ...sdkMsg }, 'cursor-agent received terminal status');
+            // Clear the stored agent ID on error/expiry so the next turn creates a fresh
+            // agent rather than resuming a broken or auth-expired one.
+            if (status === 'ERROR' || status === 'EXPIRED') {
+              await this.app.get('db')('sessions').where({ id: sessionId }).update({ cursor_agent_id: null });
+            }
             const statusMsg =
               status === 'EXPIRED'
                 ? 'Cursor agent conversation expired.'
@@ -310,6 +319,13 @@ ${systemPrompt}`;
             .service('sessions')
             .patch(sessionId, { status: 'failed' }, { user: { id: userId } });
           await this._persistStatusMessage(sessionId, userId, err.message);
+          // Clear the agent ID on auth errors so the next turn creates a fresh agent.
+          const isAuthErr =
+            err?.message?.toLowerCase().includes('authentication') ||
+            err?.message?.toLowerCase().includes('unauthorized');
+          if (isAuthErr) {
+            await this.app.get('db')('sessions').where({ id: sessionId }).update({ cursor_agent_id: null });
+          }
         } catch {
           // ignore secondary errors
         }
