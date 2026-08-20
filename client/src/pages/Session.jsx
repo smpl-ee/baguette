@@ -757,6 +757,7 @@ export default function Session() {
                               const newModelObj = models.find((m) => m.id === newId);
                               if (isCursor && newModelObj?.variants?.length) {
                                 setMenuModelOverride(newId);
+                                handleModelChange(newId);
                               } else {
                                 handleModelChange(newId);
                                 setShowMenu(false);
@@ -783,7 +784,6 @@ export default function Session() {
                                   handleModelChange(
                                     JSON.stringify({ id: menuModelId, params: v.params })
                                   );
-                                  setShowMenu(false);
                                 }}
                                 className="w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-300 focus:outline-none mb-1"
                               >
