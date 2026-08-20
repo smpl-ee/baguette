@@ -68,7 +68,8 @@ export class CursorAgentService {
     const absoluteCwd = resolveDataDirRelativePath(session.worktree_path) || '';
     const rulesDir = join(absoluteCwd, '.cursor', 'rules');
     const rulesFile = join(rulesDir, 'baguette.mdc');
-    const systemPrompt = await buildSystemPromptAppend(session);
+    // DB rows don't have absolute_worktree_path (added by the Feathers serializer), so inject it.
+    const systemPrompt = await buildSystemPromptAppend({ ...session, absolute_worktree_path: absoluteCwd });
     const mdcContent = `---
 description: Baguette session rules (always applied)
 alwaysApply: true
