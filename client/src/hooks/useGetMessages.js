@@ -60,11 +60,18 @@ export function useGetMessages(sessionId) {
       setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]));
     };
 
+    const onPatched = (message) => {
+      if (message.session_id !== sessionId) return;
+      setMessages((prev) => prev.map((m) => (m.id === message.id ? message : m)));
+    };
+
     messagesService.on('created', onCreated);
+    messagesService.on('patched', onPatched);
 
     return () => {
       cancelled = true;
       messagesService.off('created', onCreated);
+      messagesService.off('patched', onPatched);
     };
   }, [sessionId]);
 

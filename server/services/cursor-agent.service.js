@@ -332,28 +332,67 @@ ${systemPrompt}`;
 
     if (sdkMsg.type === 'tool_call') {
       if (sdkMsg.status === 'running') {
-        // Buffer only — running fires multiple times as args stream in
-        pendingToolCalls.set(sdkMsg.call_id, {
-          name: sdkMsg.name,
-          args: sdkMsg.args,
-          agentId: sdkMsg.agent_id,
-          runId: sdkMsg.run_id,
-        });
+        if (!pendingToolCalls.has(sdkMsg.call_id)) {
+          // First running event — persist tool_use immediately so it appears in the UI
+          // before the tool finishes executing (args may still be streaming in).
+          const persistedMsg = await this._persistMessage(sessionId, userId, {
+            type: 'assistant',
+            agent_id: sdkMsg.agent_id,
+            run_id: sdkMsg.run_id,
+            message: {
+              role: 'assistant',
+              content: [{ type: 'tool_use', id: sdkMsg.call_id, name: sdkMsg.name, input: sdkMsg.args ?? {} }],
+            },
+          });
+          pendingToolCalls.set(sdkMsg.call_id, {
+            name: sdkMsg.name,
+            args: sdkMsg.args,
+            agentId: sdkMsg.agent_id,
+            runId: sdkMsg.run_id,
+            persistedMsgId: persistedMsg.id,
+          });
+        } else {
+          // Subsequent running events — accumulate args
+          const pending = pendingToolCalls.get(sdkMsg.call_id);
+          pendingToolCalls.set(sdkMsg.call_id, {
+            ...pending,
+            name: sdkMsg.name ?? pending.name,
+            args: sdkMsg.args ?? pending.args,
+          });
+        }
       } else {
-        // completed or error — persist tool_use with final args, then tool_result
+        // completed or error — update tool_use with final args, then persist tool_result
         const pending = pendingToolCalls.get(sdkMsg.call_id);
         const finalName = pending?.name ?? sdkMsg.name;
         const finalArgs = pending?.args ?? sdkMsg.args ?? {};
 
-        await this._persistMessage(sessionId, userId, {
-          type: 'assistant',
-          agent_id: pending?.agentId ?? sdkMsg.agent_id,
-          run_id: pending?.runId ?? sdkMsg.run_id,
-          message: {
-            role: 'assistant',
-            content: [{ type: 'tool_use', id: sdkMsg.call_id, name: finalName, input: finalArgs }],
-          },
-        });
+        if (pending?.persistedMsgId) {
+          // Patch the already-persisted tool_use message with final args
+          const finalToolUse = {
+            type: 'assistant',
+            agent_id: pending.agentId ?? sdkMsg.agent_id,
+            run_id: pending.runId ?? sdkMsg.run_id,
+            message: {
+              role: 'assistant',
+              content: [{ type: 'tool_use', id: sdkMsg.call_id, name: finalName, input: finalArgs }],
+            },
+          };
+          await this.app.service('messages').patch(
+            pending.persistedMsgId,
+            { message_json: JSON.stringify(finalToolUse) },
+            { provider: undefined, user: { id: userId } }
+          );
+        } else {
+          await this._persistMessage(sessionId, userId, {
+            type: 'assistant',
+            agent_id: pending?.agentId ?? sdkMsg.agent_id,
+            run_id: pending?.runId ?? sdkMsg.run_id,
+            message: {
+              role: 'assistant',
+              content: [{ type: 'tool_use', id: sdkMsg.call_id, name: finalName, input: finalArgs }],
+            },
+          });
+        }
 
         const isError = sdkMsg.status === 'error';
         const resultContent =
@@ -418,7 +457,7 @@ ${systemPrompt}`;
   }
 
   async _persistMessage(sessionId, userId, message) {
-    await this.app.service('messages').create(
+    return await this.app.service('messages').create(
       {
         session_id: sessionId,
         type: message.type,
