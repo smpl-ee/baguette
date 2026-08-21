@@ -632,17 +632,6 @@ export default function Session() {
                     </button>
                   </span>
                 )}
-                {(localSha || remoteSha) && (
-                  <span className="shrink-0 font-mono text-zinc-600 text-[10px]">
-                    {localSha ?? '?'}
-                    {remoteSha !== null && (
-                      <span className={remoteSha === localSha ? 'text-zinc-700' : 'text-zinc-500'}>
-                        {' / '}
-                        {remoteSha}
-                      </span>
-                    )}
-                  </span>
-                )}
                 {session.preview_url && (
                   <span className="shrink-0 flex items-center gap-1">
                     <a
