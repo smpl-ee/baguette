@@ -655,7 +655,7 @@ export async function mergePR(token, repoFullName, prNumber) {
 
 /**
  * Fetches a single PR by number. Throws if not found or request fails.
- * @returns {{ number, html_url, title, body, head: { ref }, base: { ref } }}
+ * @returns {{ number, html_url, title, body, state, draft, author, head: { ref }, base: { ref }, labels, created_at, updated_at, merged_at }}
  */
 export async function getOpenPRByNumber(token, repoFullName, prNumber) {
   const res = await fetch(`https://api.github.com/repos/${repoFullName}/pulls/${prNumber}`, {
@@ -675,8 +675,15 @@ export async function getOpenPRByNumber(token, repoFullName, prNumber) {
     html_url: data.html_url,
     title: data.title,
     body: data.body || '',
+    state: data.state,
+    draft: data.draft,
+    author: data.user?.login,
     head: { ref: data.head.ref },
     base: { ref: data.base.ref },
+    labels: data.labels?.map((l) => l.name) ?? [],
+    created_at: data.created_at,
+    updated_at: data.updated_at,
+    merged_at: data.merged_at,
   };
 }
 
@@ -1087,6 +1094,17 @@ export async function listRepoPRs(token, repoFullName, { state = 'open', author,
     labels: pr.labels?.map((l) => l.name) ?? [],
     updated_at: pr.updated_at,
   }));
+}
+
+export async function addLabelsToPR(token, repoFullName, prNumber, labels) {
+  const headers = GH_HEADERS(token);
+  const res = await fetch(
+    `https://api.github.com/repos/${repoFullName}/issues/${prNumber}/labels`,
+    { method: 'POST', headers, body: JSON.stringify({ labels }) }
+  );
+  if (!res.ok) throw new Error(`GitHub API error: ${await res.text()}`);
+  const data = await res.json();
+  return data.map((l) => l.name);
 }
 
 export async function listRepoTags(token, repoFullName) {
