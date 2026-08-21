@@ -280,8 +280,8 @@ export default function Session() {
   const [showMenu, setShowMenu] = useState(false);
   const [menuModelOverride, setMenuModelOverride] = useState(null);
   const [models, setModels] = useState([]);
-  const [localSha, setLocalSha] = useState(null);
-  const [remoteSha, setRemoteSha] = useState(null);
+  const [_localSha, setLocalSha] = useState(null);
+  const [_remoteSha, setRemoteSha] = useState(null);
   const [pushing, setPushing] = useState(false);
   const [showPushModal, setShowPushModal] = useState(false);
   const [pushRequest, setPushRequest] = useState(null);

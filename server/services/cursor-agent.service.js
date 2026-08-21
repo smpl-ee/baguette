@@ -113,6 +113,13 @@ ${systemPrompt}`;
     }
 
     const apiKey = repoApiKey || user.cursor_api_key || undefined;
+    const apiKeySource = repoApiKey ? 'repo' : user.cursor_api_key ? 'user' : 'none';
+    const maskedApiKey = apiKey
+      ? apiKey.length > 8
+        ? `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}`
+        : `${apiKey.slice(0, 2)}...`
+      : null;
+
     const cwd = resolveDataDirRelativePath(session.worktree_path) || '';
 
     const agentOptions = {
@@ -137,10 +144,33 @@ ${systemPrompt}`;
       }
     }
 
+    logger.info(
+      {
+        sessionId: session.id,
+        userId: session.user_id,
+        repoId: session.repo_id,
+        apiKeySource,
+        apiKeyMasked: maskedApiKey,
+        apiKeyPresent: !!apiKey,
+        model: agentOptions.model,
+        storedAgentId: session.cursor_agent_id || null,
+        cwd,
+      },
+      'cursor-agent: resolving agent'
+    );
+
     let agent;
     if (session.cursor_agent_id) {
+      logger.info(
+        { sessionId: session.id, cursor_agent_id: session.cursor_agent_id },
+        'cursor-agent: attempting resume'
+      );
       try {
         agent = await Agent.resume(session.cursor_agent_id, agentOptions);
+        logger.info(
+          { sessionId: session.id, cursor_agent_id: session.cursor_agent_id },
+          'cursor-agent: agent resumed successfully'
+        );
       } catch (err) {
         const isRecoverable =
           err instanceof AgentNotFoundError ||
@@ -148,15 +178,39 @@ ${systemPrompt}`;
           err?.message?.toLowerCase().includes('unauthorized');
         if (!isRecoverable) throw err;
         // Agent data deleted/corrupted or auth expired — clear the stale ID and fall through to create.
-        logger.warn({ sessionId: session.id, err: err.message }, 'cursor-agent: agent resume failed, creating fresh agent');
+        logger.warn(
+          {
+            sessionId: session.id,
+            cursor_agent_id: session.cursor_agent_id,
+            apiKeySource,
+            apiKeyMasked: maskedApiKey,
+            errName: err.name,
+            errMessage: err.message,
+            isAgentNotFound: err instanceof AgentNotFoundError,
+          },
+          'cursor-agent: agent resume failed, creating fresh agent'
+        );
         await db('sessions').where({ id: session.id }).update({ cursor_agent_id: null });
       }
     }
     if (!agent) {
+      logger.info(
+        {
+          sessionId: session.id,
+          apiKeySource,
+          apiKeyMasked: maskedApiKey,
+          model: agentOptions.model,
+        },
+        'cursor-agent: creating new agent'
+      );
       // Write system prompt to .cursor/rules/baguette.mdc before creating agent
       // so Cursor picks it up via settingSources: ['project']
       await this._writeSystemPrompt(session);
       agent = await Agent.create(agentOptions);
+      logger.info(
+        { sessionId: session.id, newAgentId: agent.agentId },
+        'cursor-agent: new agent created'
+      );
       await db('sessions').where({ id: session.id }).update({ cursor_agent_id: agent.agentId });
     }
 
@@ -281,7 +335,23 @@ ${systemPrompt}`;
             break;
           }
           if (status === 'ERROR' || status === 'CANCELLED' || status === 'EXPIRED') {
-            logger.warn({ sessionId, ...sdkMsg }, 'cursor-agent received terminal status');
+            const isAuthError =
+              sdkMsg.message?.toLowerCase().includes('authentication') ||
+              sdkMsg.message?.toLowerCase().includes('unauthorized') ||
+              sdkMsg.message?.toLowerCase().includes('logged in');
+            logger.warn(
+              {
+                sessionId,
+                userId,
+                status,
+                agent_id: sdkMsg.agent_id,
+                run_id: sdkMsg.run_id,
+                sdkMessage: sdkMsg.message,
+                isAuthError,
+                sdkMsgFull: sdkMsg,
+              },
+              'cursor-agent received terminal status'
+            );
             // Clear the stored agent ID on error/expiry so the next turn creates a fresh
             // agent rather than resuming a broken or auth-expired one.
             if (status === 'ERROR' || status === 'EXPIRED') {
@@ -312,17 +382,26 @@ ${systemPrompt}`;
       }
     } catch (err) {
       if (err.name !== 'AbortError') {
-        logger.error({ sessionId }, 'Cursor session stream error');
-        logger.error(err, 'Cursor session stream error');
+        const isAuthErr =
+          err?.message?.toLowerCase().includes('authentication') ||
+          err?.message?.toLowerCase().includes('unauthorized');
+        logger.error(
+          {
+            sessionId,
+            userId,
+            errName: err.name,
+            errMessage: err.message,
+            errStack: err.stack,
+            isAuthErr,
+          },
+          'Cursor session stream error'
+        );
         try {
           await this.app
             .service('sessions')
             .patch(sessionId, { status: 'failed' }, { user: { id: userId } });
           await this._persistStatusMessage(sessionId, userId, err.message);
           // Clear the agent ID on auth errors so the next turn creates a fresh agent.
-          const isAuthErr =
-            err?.message?.toLowerCase().includes('authentication') ||
-            err?.message?.toLowerCase().includes('unauthorized');
           if (isAuthErr) {
             await this.app.get('db')('sessions').where({ id: sessionId }).update({ cursor_agent_id: null });
           }
