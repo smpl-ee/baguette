@@ -33,6 +33,10 @@ function extractUserText(parsed) {
 export class CursorAgentService {
   constructor() {
     this._activeSessions = new Map();
+    // Persistent across turns: sessionId → Agent. Keeps SDK caches warm (ghost-mode exchange,
+    // in-memory state) so the /auth/exchange_user_api_key call only happens once per
+    // agent lifetime in-process, not on every turn after a resume.
+    this._agents = new Map();
   }
 
   setup(app) {
@@ -98,7 +102,21 @@ ${systemPrompt}`;
     }
   }
 
+  // Returns { agent, fromMemory } where fromMemory=true means the Agent instance was
+  // already warm in-process (SDK caches intact — no exchange_user_api_key call needed).
   async _getOrCreateAgent(session) {
+    const sessionId = session.id;
+
+    // Hot path: reuse the live Agent instance from this process. This keeps the SDK's
+    // in-memory caches warm (ghost-mode exchange result, etc.) and avoids resuming from
+    // SQLite or calling Cursor's auth exchange endpoint on every turn.
+    const cached = this._agents.get(sessionId);
+    if (cached) {
+      logger.info({ sessionId, agentId: cached.agentId }, 'cursor-agent: memory cache hit');
+      return { agent: cached, fromMemory: true };
+    }
+    logger.info({ sessionId, storedAgentId: session.cursor_agent_id || null }, 'cursor-agent: memory cache miss');
+
     const db = this.app.get('db');
     const user = await this.app.service('users').get(session.user_id, {});
 
@@ -128,8 +146,6 @@ ${systemPrompt}`;
         cwd,
         settingSources: ['project'],
         customTools: buildCursorCustomTools(session, this.app),
-        // Store the SDK's SQLite state under the persistent Baguette volume so
-        // Agent.resume() works across container/server restarts.
         stateRoot: join(DATA_DIR, 'cursor-sdk-store'),
       },
     };
@@ -144,32 +160,28 @@ ${systemPrompt}`;
       }
     }
 
-    logger.info(
-      {
-        sessionId: session.id,
-        userId: session.user_id,
-        repoId: session.repo_id,
-        apiKeySource,
-        apiKeyMasked: maskedApiKey,
-        apiKeyPresent: !!apiKey,
-        model: agentOptions.model,
-        storedAgentId: session.cursor_agent_id || null,
-        cwd,
-      },
-      'cursor-agent: resolving agent'
-    );
+    const coldStartContext = {
+      sessionId,
+      userId: session.user_id,
+      repoId: session.repo_id,
+      apiKeySource,
+      apiKeyMasked: maskedApiKey,
+      apiKeyPresent: !!apiKey,
+      model: agentOptions.model,
+      cwd,
+    };
 
     let agent;
     if (session.cursor_agent_id) {
       logger.info(
-        { sessionId: session.id, cursor_agent_id: session.cursor_agent_id },
-        'cursor-agent: attempting resume'
+        { ...coldStartContext, storedAgentId: session.cursor_agent_id },
+        'cursor-agent: cache miss — resuming stored agent'
       );
       try {
         agent = await Agent.resume(session.cursor_agent_id, agentOptions);
         logger.info(
-          { sessionId: session.id, cursor_agent_id: session.cursor_agent_id },
-          'cursor-agent: agent resumed successfully'
+          { sessionId, agentId: session.cursor_agent_id },
+          'cursor-agent: resume succeeded'
         );
       } catch (err) {
         const isRecoverable =
@@ -177,50 +189,37 @@ ${systemPrompt}`;
           err?.message?.toLowerCase().includes('authentication') ||
           err?.message?.toLowerCase().includes('unauthorized');
         if (!isRecoverable) throw err;
-        // Agent data deleted/corrupted or auth expired — clear the stale ID and fall through to create.
         logger.warn(
           {
-            sessionId: session.id,
-            cursor_agent_id: session.cursor_agent_id,
-            apiKeySource,
-            apiKeyMasked: maskedApiKey,
+            sessionId,
+            storedAgentId: session.cursor_agent_id,
             errName: err.name,
             errMessage: err.message,
             isAgentNotFound: err instanceof AgentNotFoundError,
           },
-          'cursor-agent: agent resume failed, creating fresh agent'
+          'cursor-agent: resume failed, will create fresh agent'
         );
-        await db('sessions').where({ id: session.id }).update({ cursor_agent_id: null });
+        logger.info({ sessionId, storedAgentId: session.cursor_agent_id }, 'cursor-agent: clearing agent id');
+        await db('sessions').where({ id: sessionId }).update({ cursor_agent_id: null });
       }
     }
     if (!agent) {
-      logger.info(
-        {
-          sessionId: session.id,
-          apiKeySource,
-          apiKeyMasked: maskedApiKey,
-          model: agentOptions.model,
-        },
-        'cursor-agent: creating new agent'
-      );
-      // Write system prompt to .cursor/rules/baguette.mdc before creating agent
-      // so Cursor picks it up via settingSources: ['project']
+      logger.info(coldStartContext, 'cursor-agent: cache miss — creating new agent');
       await this._writeSystemPrompt(session);
       agent = await Agent.create(agentOptions);
-      logger.info(
-        { sessionId: session.id, newAgentId: agent.agentId },
-        'cursor-agent: new agent created'
-      );
-      await db('sessions').where({ id: session.id }).update({ cursor_agent_id: agent.agentId });
+      logger.info({ sessionId, agentId: agent.agentId }, 'cursor-agent: new agent created');
+      await db('sessions').where({ id: sessionId }).update({ cursor_agent_id: agent.agentId });
     }
 
-    return agent;
+    this._agents.set(sessionId, agent);
+    return { agent, fromMemory: false };
   }
 
   async _runTurn(session, parsed) {
     const sessionId = session.id;
     const userId = session.user_id;
     let turnFinishedOk = false;
+    let fromMemory = true; // assume warm until _getOrCreateAgent tells us otherwise
 
     const sessionState = { isProcessing: true, userId, currentRun: null };
     this._activeSessions.set(sessionId, sessionState);
@@ -230,7 +229,9 @@ ${systemPrompt}`;
         .service('sessions')
         .patch(sessionId, { status: 'running' }, { user: { id: userId } });
 
-      const agent = await this._getOrCreateAgent(session);
+      const agentResult = await this._getOrCreateAgent(session);
+      fromMemory = agentResult.fromMemory;
+      const { agent } = agentResult;
       const userText = extractUserText(parsed);
 
       const sendOptions = {};
@@ -344,6 +345,7 @@ ${systemPrompt}`;
                 sessionId,
                 userId,
                 status,
+                fromMemory,
                 agent_id: sdkMsg.agent_id,
                 run_id: sdkMsg.run_id,
                 sdkMessage: sdkMsg.message,
@@ -352,17 +354,26 @@ ${systemPrompt}`;
               },
               'cursor-agent received terminal status'
             );
-            // Clear the stored agent ID on error/expiry so the next turn creates a fresh
-            // agent rather than resuming a broken or auth-expired one.
+            // Evict the agent from the in-memory map on any error so the next turn
+            // cold-starts cleanly (re-runs the auth exchange, etc.).
+            logger.info({ sessionId, status }, 'cursor-agent: clearing memory cache');
+            this._agents.delete(sessionId);
             if (status === 'ERROR' || status === 'EXPIRED') {
+              logger.info({ sessionId, status }, 'cursor-agent: clearing agent id');
               await this.app.get('db')('sessions').where({ id: sessionId }).update({ cursor_agent_id: null });
             }
-            const statusMsg =
-              status === 'EXPIRED'
-                ? 'Cursor agent conversation expired.'
-                : status === 'ERROR'
-                  ? `Cursor agent encountered an error.${sdkMsg.message ? ` ${sdkMsg.message}` : ''} Send your message again to continue in a fresh conversation.`
-                  : 'Cursor agent was cancelled.';
+            let statusMsg;
+            if (status === 'EXPIRED') {
+              statusMsg = 'Cursor agent conversation expired. Send your message again to continue in a fresh conversation.';
+            } else if (status === 'CANCELLED') {
+              statusMsg = 'Cursor agent was cancelled.';
+            } else if (isAuthError && !fromMemory) {
+              // Cold-started agent (just resumed or created) already failed auth —
+              // not a stale in-memory instance, likely a backend or API key issue.
+              statusMsg = 'Cursor authentication failed. Please verify your API key in settings, or try again later if this is a temporary Cursor service issue.';
+            } else {
+              statusMsg = `Cursor agent encountered an error.${sdkMsg.message ? ` ${sdkMsg.message}` : ''} Send your message again to continue in a fresh conversation.`;
+            }
             await this.app
               .service('sessions')
               .patch(sessionId, { status: 'failed' }, { user: { id: userId } });
@@ -396,13 +407,20 @@ ${systemPrompt}`;
           },
           'Cursor session stream error'
         );
+        // Always evict on unhandled error so the next turn cold-starts cleanly.
+        logger.info({ sessionId, errName: err.name }, 'cursor-agent: clearing memory cache');
+        this._agents.delete(sessionId);
         try {
           await this.app
             .service('sessions')
             .patch(sessionId, { status: 'failed' }, { user: { id: userId } });
-          await this._persistStatusMessage(sessionId, userId, err.message);
-          // Clear the agent ID on auth errors so the next turn creates a fresh agent.
+          let errStatusMsg = err.message;
+          if (isAuthErr && !fromMemory) {
+            errStatusMsg = 'Cursor authentication failed. Please verify your API key in settings, or try again later if this is a temporary Cursor service issue.';
+          }
+          await this._persistStatusMessage(sessionId, userId, errStatusMsg);
           if (isAuthErr) {
+            logger.info({ sessionId }, 'cursor-agent: clearing agent id');
             await this.app.get('db')('sessions').where({ id: sessionId }).update({ cursor_agent_id: null });
           }
         } catch {
@@ -583,6 +601,10 @@ ${systemPrompt}`;
       // ignore cancellation errors
     }
     this._activeSessions.delete(sessionId);
+    if (this._agents.has(sessionId)) {
+      logger.info({ sessionId }, 'cursor-agent: clearing memory cache (session stopped)');
+      this._agents.delete(sessionId);
+    }
   }
 
   getActiveSession(sessionId) {
