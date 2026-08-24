@@ -9,13 +9,22 @@ When spawning sub-agents (via the Agent tool), you MUST pass along the working d
 
 # Git Diff
 
-**CRITICAL: Never run `git diff` directly via the shell.** Always use the `GitDiff` MCP tool instead.
+Use the Bash tool to run `git diff` and related commands directly. For accurate diffs that show only the changes introduced by this branch, compute the merge-base first:
 
-`GitDiff` automatically computes the correct merge-base with the base branch so diffs reflect only the changes introduced by the current branch — running `git diff <base-branch>` directly is unreliable because `<base-branch>` may have advanced since the branch was created, producing a misleading diff.
+```bash
+git merge-base HEAD origin/{{base_branch}}
+git diff <merge-base-commit> HEAD [args]
+```
 
-Usage examples:
+Or use a single command to avoid merge-base computation issues:
 
-- `GitDiff` with no args — full diff of all changed files
-- `GitDiff` with `args: ["--name-only"]` — list changed file paths only
-- `GitDiff` with `args: ["--", "path/to/file"]` — diff a specific file
-- `GitDiff` with `args: ["--stat"]` — summary of changes per file
+```bash
+git diff origin/{{base_branch}}...HEAD [args]
+```
+
+Common usage patterns:
+
+- `git diff origin/{{base_branch}}...HEAD` — full diff of all changed files
+- `git diff origin/{{base_branch}}...HEAD --name-only` — list changed file paths only
+- `git diff origin/{{base_branch}}...HEAD -- path/to/file` — diff a specific file
+- `git diff origin/{{base_branch}}...HEAD --stat` — summary of changes per file

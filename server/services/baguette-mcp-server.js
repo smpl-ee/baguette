@@ -44,37 +44,6 @@ function streamToLines(text) {
   return lines;
 }
 
-/**
- * Annotates unified diff output with absolute new-file line numbers so the
- * agent can directly reference them for inline comments without counting.
- *
- * Format: each added/context line gets a `L<n>:` prefix showing the new-file
- * line number. Removed lines get `(del):` since they no longer exist in HEAD.
- * Hunk headers (`@@ ... @@`) are preserved unchanged.
- */
-function annotateWithLineNumbers(diffText) {
-  const lines = diffText.split('\n');
-  const out = [];
-  let newLine = 0;
-  for (const line of lines) {
-    if (line.startsWith('@@')) {
-      const m = line.match(/@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-      if (m) newLine = parseInt(m[1], 10);
-      out.push(line);
-    } else if (line.startsWith('+') && !line.startsWith('+++')) {
-      out.push(`L${newLine}: ${line}`);
-      newLine++;
-    } else if (line.startsWith('-') && !line.startsWith('---')) {
-      out.push(`(del): ${line}`);
-    } else if (line.startsWith(' ')) {
-      out.push(`L${newLine}: ${line}`);
-      newLine++;
-    } else {
-      out.push(line);
-    }
-  }
-  return out.join('\n');
-}
 
 /**
  * Creates tool definitions shared between Claude SDK MCP server and Cursor customTools.
@@ -862,50 +831,6 @@ function buildBaguetteToolList(session, app) {
             sessionPath,
             message: `Configuration session started: ${sessionPath}`,
           });
-        },
-      },
-
-      // ── Diff ───────────────────────────────────────────────────────────────
-
-      {
-        name: 'GitDiff',
-        description:
-          'Run git diff relative to the merge-base with the base branch. Automatically computes the correct merge-base so diffs show only changes introduced by this branch.',
-        schema: {
-          args: z
-            .array(z.string())
-            .optional()
-            .describe(
-              'Extra git diff arguments, e.g. ["--name-only"] to list changed files, or ["--", "path/to/file"] for a specific file.'
-            ),
-        },
-        handler: async ({ args = [] }) => {
-          const mergeBase = baseBranch
-            ? await execFileAsync('git', ['merge-base', 'HEAD', `origin/${baseBranch}`], {
-                cwd: absoluteWorktreePath,
-              })
-                .then((r) => r.stdout.trim())
-                .catch(() =>
-                  execFileAsync('git', ['merge-base', 'HEAD', baseBranch], {
-                    cwd: absoluteWorktreePath,
-                  })
-                    .then((r) => r.stdout.trim())
-                    .catch(() => null)
-                )
-            : null;
-          const base = mergeBase || 'HEAD~1';
-          const rawDiff = await execFileAsync('git', ['diff', base, 'HEAD', ...args], {
-            cwd: absoluteWorktreePath,
-            maxBuffer: 5 * 1024 * 1024,
-          })
-            .then((r) => r.stdout)
-            .catch((err) => err.stdout || '');
-          // Annotate with line numbers unless using summary flags
-          const isSummary = args.some((a) =>
-            ['--name-only', '--name-status', '--stat', '--shortstat'].includes(a)
-          );
-          const diff = rawDiff && !isSummary ? annotateWithLineNumbers(rawDiff) : rawDiff;
-          return ok({ diff: diff || '(no changes)', base });
         },
       },
 

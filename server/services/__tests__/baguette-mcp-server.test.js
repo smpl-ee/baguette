@@ -727,46 +727,6 @@ describe('PrWorkflowLogs', () => {
   });
 });
 
-describe('GitDiff', () => {
-  it('calls git merge-base to compute base and returns annotated diff', async () => {
-    execFile.mockImplementation((_cmd, args, _opts, cb) => {
-      if (args[0] === 'merge-base') {
-        cb(null, { stdout: 'abc123\n', stderr: '' });
-      } else if (args[0] === 'diff') {
-        cb(null, { stdout: '@@ -1,3 +1,3 @@\n context\n+added line\n-removed\n', stderr: '' });
-      } else {
-        cb(null, { stdout: '', stderr: '' });
-      }
-    });
-    const { tools } = buildServer();
-    const result = parseResult(await callTool(tools, 'GitDiff', { args: [] }));
-    expect(result.ok).toBe(true);
-    expect(result.base).toBe('abc123');
-    expect(result.diff).toContain('L2: +added line');
-    expect(result.diff).toContain('(del): -removed');
-  });
-
-  it('skips annotation for --name-only flag', async () => {
-    execFile.mockImplementation((_cmd, args, _opts, cb) => {
-      if (args[0] === 'merge-base') cb(null, { stdout: 'abc1234\n', stderr: '' });
-      else if (args[0] === 'diff') cb(null, { stdout: 'src/foo.js\nsrc/bar.js\n', stderr: '' });
-      else cb(null, { stdout: '', stderr: '' });
-    });
-    const { tools } = buildServer();
-    const result = parseResult(await callTool(tools, 'GitDiff', { args: ['--name-only'] }));
-    expect(result.diff).toBe('src/foo.js\nsrc/bar.js\n');
-    expect(result.diff).not.toContain('L1:');
-  });
-
-  it('falls back to HEAD~1 when no base branch configured', async () => {
-    execFile.mockImplementationOnce((_cmd, _args, _opts, cb) =>
-      cb(null, { stdout: 'file.js\n', stderr: '' })
-    );
-    const { tools } = buildServer({ base_branch: null });
-    const result = parseResult(await callTool(tools, 'GitDiff', { args: ['--name-only'] }));
-    expect(result.base).toBe('HEAD~1');
-  });
-});
 
 describe('ShowDiff', () => {
   it('returns ok: true with path and no diff content', async () => {

@@ -17,6 +17,7 @@ export async function buildSystemPromptAppend(sessionRow) {
     baguette_config_notice: baguetteConfigNotice,
     base_prompt: await loadPrompt('base-prompt', {
       worktree_path: sessionRow.absolute_worktree_path,
+      base_branch: sessionRow.base_branch,
       working_directory_restrictions:
         'Work exclusively within your current working directory. Do not read, edit, search files or run any shell command outside of it.',
     }),
