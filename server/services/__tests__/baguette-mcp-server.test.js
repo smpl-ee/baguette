@@ -16,20 +16,24 @@ vi.mock('child_process', () => ({
   execFile: vi.fn((_cmd, _args, _opts, cb) => cb(null, { stdout: '', stderr: '' })),
 }));
 
-vi.mock('../github.js', () => ({
-  gitPull: vi.fn(),
-  gitPush: vi.fn(),
-  gitFetch: vi.fn(),
-  upsertPR: vi.fn(),
-  getOpenPR: vi.fn().mockResolvedValue(null),
-  getOpenPRByNumber: vi.fn().mockResolvedValue({ title: 'PR title', body: 'PR body' }),
-  getPRComments: vi.fn(),
-  createPRComment: vi.fn(),
-  createPRLineComment: vi.fn(),
-  createPRReview: vi.fn(),
-  getPRWorkflows: vi.fn(),
-  getPRWorkflowLogs: vi.fn(),
-}));
+vi.mock('../github.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    gitPull: vi.fn(),
+    gitPush: vi.fn(),
+    gitFetch: vi.fn(),
+    upsertPR: vi.fn(),
+    getOpenPR: vi.fn().mockResolvedValue(null),
+    getOpenPRByNumber: vi.fn().mockResolvedValue({ title: 'PR title', body: 'PR body' }),
+    getPRComments: vi.fn(),
+    createPRComment: vi.fn(),
+    createPRLineComment: vi.fn(),
+    createPRReview: vi.fn(),
+    getPRWorkflows: vi.fn(),
+    getPRWorkflowLogs: vi.fn(),
+  };
+});
 
 vi.mock('../baguette-config.js', async (importOriginal) => {
   const actual = await importOriginal();
@@ -62,6 +66,7 @@ import {
   createPRReview,
   getPRWorkflows,
   getPRWorkflowLogs,
+  BAGUETTE_DESCRIPTION_MARKER,
 } from '../github.js';
 import { loadBaguetteConfig } from '../baguette-config.js';
 import { buildBaguetteMcpServer } from '../baguette-mcp-server.js';
@@ -192,7 +197,8 @@ describe('PrRead', () => {
   });
 
   it('returns title and description fetched from GitHub when PR exists', async () => {
-    getOpenPRByNumber.mockResolvedValueOnce({ title: 'GitHub PR title', body: 'GitHub PR body' });
+    const body = `${BAGUETTE_DESCRIPTION_MARKER}\n---\n\nGitHub PR body`;
+    getOpenPRByNumber.mockResolvedValueOnce({ title: 'GitHub PR title', body });
     const { tools } = buildServer({
       pr_url: 'https://github.com/owner/repo/pull/42',
       pr_number: 42,
@@ -201,6 +207,17 @@ describe('PrRead', () => {
     expect(result.title).toBe('GitHub PR title');
     expect(result.description).toBe('GitHub PR body');
     expect(getOpenPRByNumber).toHaveBeenCalledWith('ghtoken', 'owner/repo', 42);
+  });
+
+  it('strips marker and returns only baguette content when user prefix is present', async () => {
+    const body = `My notes\n\n${BAGUETTE_DESCRIPTION_MARKER}\n---\n\nBaguette summary`;
+    getOpenPRByNumber.mockResolvedValueOnce({ title: 'PR', body });
+    const { tools } = buildServer({
+      pr_url: 'https://github.com/owner/repo/pull/1',
+      pr_number: 1,
+    });
+    const result = parseResult(await callTool(tools, 'PrRead'));
+    expect(result.description).toBe('Baguette summary');
   });
 
   it('returns null title and description when no PR exists', async () => {
@@ -290,7 +307,10 @@ describe('PrUpsert', () => {
     expect(result.url).toBe('https://github.com/owner/repo/pull/1');
     expect(upsertPR).toHaveBeenCalledWith(
       'ghtoken',
-      expect.objectContaining({ head: 'feature-branch' })
+      expect.objectContaining({
+        head: 'feature-branch',
+        body: `${BAGUETTE_DESCRIPTION_MARKER}\n---\n\nDetails`,
+      })
     );
     expect(mockPatch).toHaveBeenCalledWith(
       1,
@@ -309,6 +329,7 @@ describe('PrUpsert', () => {
   });
 
   it('updates existing PR without HEAD lookup; patches label and description', async () => {
+    getOpenPRByNumber.mockResolvedValueOnce({ title: 'PR', body: '' });
     upsertPR.mockResolvedValue({ url: 'https://github.com/owner/repo/pull/5', number: 5 });
     const { tools, mockPatch } = buildServer({ pr_number: 5 });
     const result = parseResult(
@@ -316,6 +337,10 @@ describe('PrUpsert', () => {
     );
     expect(result.ok).toBe(true);
     expect(execFile).not.toHaveBeenCalled();
+    expect(upsertPR).toHaveBeenCalledWith(
+      'ghtoken',
+      expect.objectContaining({ body: `${BAGUETTE_DESCRIPTION_MARKER}\n---\n\nUpdated body` })
+    );
     expect(mockPatch).toHaveBeenCalledWith(
       1,
       {
@@ -323,6 +348,23 @@ describe('PrUpsert', () => {
         pr_description: 'Updated body',
       },
       INTERNAL_PATCH_PARAMS
+    );
+  });
+
+  it('preserves user-written content above the marker when updating an existing PR', async () => {
+    const existingBody = `My reviewer notes\n\n${BAGUETTE_DESCRIPTION_MARKER}\n---\n\nOld baguette content`;
+    getOpenPRByNumber.mockResolvedValueOnce({ title: 'PR', body: existingBody });
+    upsertPR.mockResolvedValue({ url: 'https://github.com/owner/repo/pull/5', number: 5 });
+    const { tools } = buildServer({ pr_number: 5 });
+    const result = parseResult(
+      await callTool(tools, 'PrUpsert', { title: 'Updated', description: 'New baguette content' })
+    );
+    expect(result.ok).toBe(true);
+    expect(upsertPR).toHaveBeenCalledWith(
+      'ghtoken',
+      expect.objectContaining({
+        body: `My reviewer notes\n\n${BAGUETTE_DESCRIPTION_MARKER}\n---\n\nNew baguette content`,
+      })
     );
   });
 

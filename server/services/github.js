@@ -1117,3 +1117,19 @@ export async function listRepoTags(token, repoFullName) {
   const tags = await res.json();
   return tags.map((t) => ({ name: t.name, sha: t.commit?.sha }));
 }
+
+export const BAGUETTE_DESCRIPTION_MARKER = '<!-- baguette -->';
+
+export function splitPrBody(body) {
+  const idx = (body ?? '').indexOf(BAGUETTE_DESCRIPTION_MARKER);
+  if (idx < 0) return { userPrefix: '', baguetteContent: body ?? '' };
+  const userPrefix = body.slice(0, idx).trimEnd();
+  const afterMarker = body.slice(idx + BAGUETTE_DESCRIPTION_MARKER.length).trimStart();
+  const baguetteContent = afterMarker.replace(/^---\n+/, '');
+  return { userPrefix, baguetteContent };
+}
+
+export function buildPrBody(userPrefix, baguetteContent) {
+  const baguetteSection = `${BAGUETTE_DESCRIPTION_MARKER}\n---\n\n${baguetteContent}`;
+  return userPrefix ? `${userPrefix}\n\n${baguetteSection}` : baguetteSection;
+}

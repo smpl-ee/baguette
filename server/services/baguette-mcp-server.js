@@ -20,6 +20,8 @@ import {
   listRepoPRs,
   addLabelsToPR,
   listRepoTags,
+  splitPrBody,
+  buildPrBody,
 } from './github.js';
 import { loadBaguetteConfig, getAvailableCommands, getAvailableTasks } from './baguette-config.js';
 import loadPrompt from '../prompts/loadPrompt.js';
@@ -256,7 +258,7 @@ function buildBaguetteToolList(session, app) {
           if (token && session.pr_number) {
             const pr = await getOpenPRByNumber(token, session.repo_full_name, session.pr_number);
             result.title = pr.title;
-            result.description = pr.body;
+            result.description = splitPrBody(pr.body).baguetteContent;
           }
           return ok(result);
         },
@@ -322,13 +324,28 @@ function buildBaguetteToolList(session, app) {
           // Reopen if the PR was closed (but not merged — merged was handled above)
           const reopen = Boolean(effectivePrNumber && currentPrStatus === 'closed');
 
+          // Preserve any user-written content above the baguette section
+          let userPrefix = '';
+          if (effectivePrNumber) {
+            try {
+              const existingPr = await getOpenPRByNumber(
+                await getToken(),
+                session.repo_full_name,
+                effectivePrNumber
+              );
+              userPrefix = splitPrBody(existingPr?.body ?? '').userPrefix;
+            } catch {
+              // non-fatal — proceed without user prefix
+            }
+          }
+
           const pr = await upsertPR(await getToken(), {
             repoFullName: session.repo_full_name,
             prNumber: effectivePrNumber,
             title,
-            body: description,
+            body: buildPrBody(userPrefix, description),
             head,
-            baseBranch: session.base_branch,
+            baseBranch,
             reopen,
           });
           if (!effectivePrNumber) {
