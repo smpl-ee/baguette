@@ -1,14 +1,11 @@
 import { Agent, AgentBusyError, AgentNotFoundError } from '@cursor/sdk';
-import { execFile } from 'node:child_process';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import { promisify } from 'node:util';
+import { access, mkdir, writeFile } from 'node:fs/promises';
+import { basename, dirname, join } from 'node:path';
 import logger from '../logger.js';
 import { resolveDataDirRelativePath, DATA_DIR } from '../config.js';
 import { buildCursorCustomTools } from './baguette-mcp-server.js';
 import { buildSystemPromptAppend } from './session-prompt.js';
 
-const execFileAsync = promisify(execFile);
 const CURSOR_CHEAP_MODEL_ID = 'claude-haiku-4-5';
 
 function isHumanUserMessage(parsed) {
@@ -64,10 +61,15 @@ export class CursorAgentService {
     });
   }
 
-  async _writeSystemPrompt(session) {
+  async _prepareGlobalRulesDir(session) {
     const absoluteCwd = resolveDataDirRelativePath(session.worktree_path) || '';
-    const rulesDir = join(absoluteCwd, '.cursor', 'rules');
-    const rulesFile = join(rulesDir, 'baguette.mdc');
+    // New structure: worktree is at .../sessions/<id>/worktree — cursor-dir sits alongside it.
+    // Old sessions: worktree_path points directly to the git root, fall back to DATA_DIR bucket.
+    const sessionRulesRoot =
+      basename(absoluteCwd) === 'worktree'
+        ? join(dirname(absoluteCwd), 'cursor-dir')
+        : join(DATA_DIR, 'cursor-rules', String(session.id));
+    const rulesDir = join(sessionRulesRoot, '.cursor', 'rules');
     // DB rows don't have absolute_worktree_path (added by the Feathers serializer), so inject it.
     const systemPrompt = await buildSystemPromptAppend({ ...session, absolute_worktree_path: absoluteCwd });
     const mdcContent = `---
@@ -77,24 +79,29 @@ alwaysApply: true
 
 ${systemPrompt}`;
     await mkdir(rulesDir, { recursive: true });
-    await writeFile(rulesFile, mdcContent, 'utf8');
+    await writeFile(join(rulesDir, 'baguette.mdc'), mdcContent, 'utf8');
+    return sessionRulesRoot;
+  }
 
-    // Add to the worktree-local exclude file so it's never accidentally committed
+  async _getPluginDirs(session) {
+    if (!session.plugins) return [];
     try {
-      const { stdout } = await execFileAsync(
-        'git',
-        ['rev-parse', '--git-path', 'info/exclude'],
-        { cwd: absoluteCwd }
-      );
-      const excludePath = join(absoluteCwd, stdout.trim());
-      await mkdir(join(excludePath, '..'), { recursive: true });
-      const existing = await readFile(excludePath, 'utf8').catch(() => '');
-      const pattern = '.cursor/rules/baguette.mdc';
-      if (!existing.includes(pattern)) {
-        await writeFile(excludePath, existing + (existing.endsWith('\n') || !existing ? '' : '\n') + pattern + '\n', 'utf8');
+      const pluginIds = JSON.parse(session.plugins);
+      if (!Array.isArray(pluginIds) || pluginIds.length === 0) return [];
+      const pluginRows = await this.app.get('db')('plugins').whereIn('id', pluginIds);
+      const dirs = [];
+      for (const p of pluginRows) {
+        const pluginRoot = resolveDataDirRelativePath(p.local_path);
+        try {
+          await access(join(pluginRoot, '.cursor', 'rules'));
+          dirs.push(pluginRoot);
+        } catch {
+          // plugin has no .cursor/rules/, skip
+        }
       }
-    } catch (err) {
-      logger.warn({ err: err.message }, 'cursor-agent: could not update git exclude file');
+      return dirs;
+    } catch {
+      return [];
     }
   }
 
@@ -124,11 +131,15 @@ ${systemPrompt}`;
 
     const cwd = resolveDataDirRelativePath(session.worktree_path) || '';
 
+    const baguetteRulesDir = await this._prepareGlobalRulesDir(session);
+    const pluginDirs = await this._getPluginDirs(session);
+
     const agentOptions = {
       apiKey,
       local: {
         cwd,
         settingSources: ['project'],
+        dirs: [baguetteRulesDir, ...pluginDirs],
         customTools: buildCursorCustomTools(session, this.app),
         stateRoot: join(DATA_DIR, 'cursor-sdk-store'),
       },
@@ -187,7 +198,6 @@ ${systemPrompt}`;
     }
     if (!agent) {
       logger.info(coldStartContext, 'cursor-agent: creating new agent');
-      await this._writeSystemPrompt(session);
       agent = await Agent.create(agentOptions);
       logger.info({ sessionId, agentId: agent.agentId }, 'cursor-agent: new agent created');
       await db('sessions').where({ id: sessionId }).update({ cursor_agent_id: agent.agentId });

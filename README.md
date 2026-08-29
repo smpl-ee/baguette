@@ -80,14 +80,7 @@ npm run migrate
 curl -fsSL https://claude.ai/install.sh | bash
 ```
 
-6. (Optional but recommended) Exclude Baguette's generated Cursor rules file from all your local repos by adding it to your global gitignore:
-
-```bash
-git config --global core.excludesfile ~/.gitignore_global
-echo '.cursor/rules/baguette.mdc' >> ~/.gitignore_global
-```
-
-7. Sign in with your GitHub account and configure your agent(s) in **Settings** > **Agent**.
+6. Sign in with your GitHub account and configure your agent(s) in **Settings** > **Agent**.
 
 ### Configuring agents
 

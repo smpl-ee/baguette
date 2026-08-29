@@ -247,7 +247,7 @@ export async function ensureLocalClone(localPath, strippedName) {
 export async function createWorktree(repo, branch, worktreeId, token, opts = {}) {
   const { baseBranch, detach = true } = opts;
   const barePath = repo.bare_path;
-  const worktreePath = path.join(REPOS_DIR, repo.stripped_name, 'sessions', worktreeId);
+  const worktreePath = path.join(REPOS_DIR, repo.stripped_name, 'sessions', worktreeId, 'worktree');
   await fs.promises.mkdir(path.dirname(worktreePath), { recursive: true });
 
   // Fetch into a session-unique temp ref to:
@@ -322,6 +322,10 @@ export async function removeWorktree(session, repo) {
     return;
   }
 
+  // New structure: worktree lives at .../sessions/<id>/worktree — clean the whole session dir.
+  const isNewStructure = path.basename(absoluteWorktreePath) === 'worktree';
+  const cleanupPath = isNewStructure ? path.dirname(absoluteWorktreePath) : absoluteWorktreePath;
+
   if (repo?.bare_path) {
     try {
       await fs.promises.access(repo.bare_path);
@@ -329,12 +333,15 @@ export async function removeWorktree(session, repo) {
         cwd: repo.bare_path,
         stdio: 'pipe',
       });
+      if (isNewStructure) {
+        await fs.promises.rm(cleanupPath, { recursive: true, force: true });
+      }
       return;
     } catch {
       /* fall through to rm below */
     }
   }
-  await fs.promises.rm(absoluteWorktreePath, { recursive: true, force: true });
+  await fs.promises.rm(cleanupPath, { recursive: true, force: true });
 }
 
 /**

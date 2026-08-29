@@ -60,10 +60,6 @@ RUN curl -fsSL https://mise.jdx.dev/gpg-key.pub | gpg --dearmor > /usr/share/key
 
 RUN npm install -g pnpm @anthropic-ai/claude-code@2.1.202 playwright
 
-# System-level gitignore so Baguette-generated Cursor rules are never accidentally committed.
-RUN git config --system core.excludesfile /etc/gitignore_global \
-    && printf '.cursor/rules/baguette.mdc\n' > /etc/gitignore_global
-
 # Install Chromium and its system dependencies for Playwright
 RUN npx playwright install --with-deps chromium
 

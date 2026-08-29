@@ -165,7 +165,7 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
       createNewBranch,
       branchName: branchName || undefined,
       autoPush,
-      plugins: !isCursor && selectedPlugins.length > 0 ? selectedPlugins : undefined,
+      plugins: selectedPlugins.length > 0 ? selectedPlugins : undefined,
       agentSdk,
     };
   };
@@ -348,8 +348,7 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
               ) : null;
             })()}
 
-            {/* Plugins — Claude only */}
-            {!isCursor && availablePlugins.length > 0 && (
+            {availablePlugins.length > 0 && (
               <div className="sm:col-span-2">
                 <label className="block text-sm font-medium text-zinc-300 mb-1.5">Plugins</label>
                 <div className="space-y-1.5">
