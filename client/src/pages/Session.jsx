@@ -615,7 +615,7 @@ export default function Session() {
                 )}
               </div>
               <div className="flex min-w-0 items-center gap-2 text-xs">
-                <span className="shrink-0 text-zinc-600">{session.base_branch}</span>
+                <span className="hidden sm:inline shrink-0 text-zinc-600">{session.base_branch}</span>
                 {session.created_branch && (
                   <span className="flex min-w-0 items-center gap-1 overflow-hidden text-zinc-500">
                     <GitBranch className="w-3 h-3 shrink-0" />
@@ -719,6 +719,12 @@ export default function Session() {
                         <div className="px-2 py-1 text-xs text-zinc-400">
                           {session.agent_sdk === 'cursor' ? 'Cursor' : 'Claude'}
                         </div>
+                      </div>
+                    )}
+                    {session.base_branch && (
+                      <div className="p-2 border-b border-zinc-800 sm:hidden">
+                        <div className="text-[11px] text-zinc-500 px-2 py-1">Base branch</div>
+                        <div className="px-2 py-1 text-xs text-zinc-400">{session.base_branch}</div>
                       </div>
                     )}
                     {(() => {
