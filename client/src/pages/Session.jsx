@@ -796,6 +796,21 @@ export default function Session() {
                     })()}
                     <div className="p-2 border-b border-zinc-800 sm:hidden">
                       <button
+                        onClick={() => { handlePush(); setShowMenu(false); }}
+                        disabled={pushing}
+                        className="w-full text-left px-2 py-1.5 text-xs rounded transition-colors flex items-center gap-2 text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+                      >
+                        <Upload className="w-3 h-3 shrink-0" />
+                        <span>Push</span>
+                        {commitsToPush > 0 && (
+                          <span className="flex items-center justify-center min-w-[1rem] h-4 px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold leading-none">
+                            {commitsToPush}
+                          </span>
+                        )}
+                      </button>
+                    </div>
+                    <div className="p-2 border-b border-zinc-800 sm:hidden">
+                      <button
                         onClick={handlePlanToggle}
                         className={`w-full text-left px-2 py-1.5 text-xs rounded transition-colors flex items-center justify-between ${
                           session.plan_mode
