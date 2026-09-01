@@ -397,6 +397,12 @@ export class ClaudeAgentService {
     const { queryInstance, sessionId, userId } = sessionState;
     const db = this.app.get('db');
 
+    // Track live background tasks (replace semantics: each background_tasks_changed carries the full set).
+    // We must not close the query while non-ambient background tasks are still running, because closing
+    // the query terminates the CLI subprocess and kills those tasks before they can emit task_notification.
+    let pendingBackgroundTaskIds = new Set();
+    let turnComplete = false;
+
     try {
       for await (const message of queryInstance) {
         if (message.type === 'system' && message.subtype === 'init') {
@@ -409,10 +415,19 @@ export class ClaudeAgentService {
         if (message.isReplay) continue;
         if (isHumanUserMessage(message)) continue;
 
+        // Replace background task set on every membership change.
+        if (message.type === 'system' && message.subtype === 'background_tasks_changed') {
+          pendingBackgroundTaskIds = new Set(
+            message.tasks.filter((t) => !t.ambient).map((t) => t.task_id)
+          );
+        }
+
         await this.persistMessage(sessionState, message);
 
-        // One agent “turn” ends here. We exit the stream loop; teardown always runs once in `finally`.
+        // The result message ends the current agent turn. Informational messages (task_notification,
+        // background_tasks_changed, etc.) may still follow it — do not close until background tasks settle.
         if (message.type === 'result') {
+          turnComplete = true;
           if (message.subtype === 'success' && !message.is_error) {
             await this.app
               .service('sessions')
@@ -422,6 +437,10 @@ export class ClaudeAgentService {
               .service('sessions')
               .patch(sessionId, { status: 'failed' }, { user: { id: userId } });
           }
+        }
+
+        // Exit the stream once the turn is done and no background tasks remain.
+        if (turnComplete && pendingBackgroundTaskIds.size === 0) {
           break;
         }
       }

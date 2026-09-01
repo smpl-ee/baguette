@@ -459,6 +459,48 @@ describe('ClaudeAgentService', (hooks) => {
         );
       });
     });
+
+    it('waits for background tasks to complete before closing the query', async () => {
+      const service = Object.assign(new ClaudeAgentService(), {
+        app: mockApp,
+        _db: mockApp.get('db'),
+      });
+
+      // Simulate: result arrives while a background task is still live, then background_tasks_changed
+      // clears the set once the task finishes.
+      const mockIterable = makeAsyncIterable([
+        {
+          type: 'system',
+          subtype: 'background_tasks_changed',
+          tasks: [{ task_id: 'bg-1', task_type: 'local_agent', description: 'sub', ambient: false }],
+        },
+        { type: 'result', subtype: 'success', is_error: false, total_cost_usd: 0 },
+        // task_notification arrives AFTER result — baguette must still be consuming the stream here
+        { type: 'system', subtype: 'task_notification', task_id: 'bg-1', status: 'completed', output_file: '', summary: 'done' },
+        // background_tasks_changed clears once the task is gone — this triggers the loop exit
+        { type: 'system', subtype: 'background_tasks_changed', tasks: [] },
+      ]);
+
+      query.mockImplementation(() => mockIterable);
+
+      const sessionRow = await db('sessions').where({ id: BASE_SESSION_ID }).first();
+      await service.createAgentSession(sessionRow);
+
+      // The task_notification message must have been persisted (loop stayed open past result)
+      await vi.waitFor(() => {
+        expect(mockApp._messageCreate).toHaveBeenCalledWith(
+          expect.objectContaining({ type: 'system', subtype: 'task_notification' }),
+          expect.anything()
+        );
+      });
+
+      // Status is still completed (set at result time)
+      expect(mockApp._sessionPatch).toHaveBeenCalledWith(
+        BASE_SESSION_ID,
+        { status: 'completed' },
+        expect.anything()
+      );
+    });
   });
 
   // ── 5. Assistant failure ───────────────────────────────────────────────────
