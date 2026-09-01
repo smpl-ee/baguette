@@ -88,6 +88,28 @@ export class SessionsService extends KnexService {
     return getClaudeEnvForSession(this.app, sessionId);
   }
 
+  async recentCombos({ repoFullName }, params) {
+    const db = this.app.get('db');
+    const userId = params?.user?.id;
+    const rows = await db('sessions')
+      .where({ user_id: userId, repo_full_name: repoFullName })
+      .whereNull('archived_at')
+      .orderBy('created_at', 'desc')
+      .select('agent_sdk', 'model')
+      .limit(50);
+    const seen = new Set();
+    const combos = [];
+    for (const row of rows) {
+      const key = `${row.agent_sdk}|${row.model ?? ''}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        combos.push({ agentSdk: row.agent_sdk, model: row.model ?? '' });
+      }
+      if (combos.length >= 5) break;
+    }
+    return combos;
+  }
+
   async removeByRepoId(repoId, params) {
     const db = this.app.get('db');
     const sessions = await db('sessions').where({ repo_id: repoId }).whereNull('archived_at');
@@ -679,6 +701,7 @@ export function registerSessionsService(app, path = 'sessions') {
       'push',
       'restore',
       'getPrDetails',
+      'recentCombos',
     ],
   });
   app.service(path).hooks(sessionsHooks);
@@ -714,6 +737,7 @@ export const sessionsHooks = {
     restore: [resolveSessionFromData],
     getPrDetails: [resolveSessionFromData],
     resolvePermission: [requireUser],
+    recentCombos: [requireUser],
   },
   after: {
     find: [addHasWebserver],

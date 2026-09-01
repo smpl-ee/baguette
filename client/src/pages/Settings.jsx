@@ -1,14 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { toastError } from '../utils/toastError.jsx';
-import { apiFetch } from '../api.js';
 import { usersService, reposService, userReposService } from '../feathers.js';
 import { useAuth } from '../hooks/useAuth.jsx';
 import { requestNotificationPermission } from '../utils/notifications.js';
 import { useRepoContext } from '../context/RepoContext.jsx';
 import SearchableSelect from '../components/SearchableSelect/index.jsx';
 import { repoDisplayName, isLocalRepo } from '../utils/repoDisplayName.js';
-import { variantLabel } from '../utils/models.js';
 
 // ─── RepoSearchInput ──────────────────────────────────────────────────────────
 
@@ -808,12 +806,6 @@ const AGENT_SDK_OPTIONS = [
 
 function AgentTab({ settings, onSave }) {
   const { user } = useAuth();
-  const [claudeModels, setClaudeModels] = useState([]);
-  const [cursorModels, setCursorModels] = useState([]);
-  const [model, setModel] = useState('');
-  const [cursorModel, setCursorModel] = useState('');
-  const [cursorVariantIdx, setCursorVariantIdx] = useState(null);
-  const savedCursorParamsRef = useRef(null);
   const [defaultAgentSdk, setDefaultAgentSdk] = useState('claude');
   const [anthropicApiKey, setAnthropicApiKey] = useState(null);
   const [anthropicApiKeyDirty, setAnthropicApiKeyDirty] = useState(false);
@@ -822,62 +814,12 @@ function AgentTab({ settings, onSave }) {
   const [branchPrefix, setBranchPrefix] = useState('baguette/');
   const [allowedCommands, setAllowedCommands] = useState([]);
   const [newCommand, setNewCommand] = useState('');
-  const [refreshingClaudeModels, setRefreshingClaudeModels] = useState(false);
-  const [refreshingCursorModels, setRefreshingCursorModels] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    apiFetch('/api/settings/models')
-      .then((d) => setClaudeModels(d.models || []))
-      .catch(() => setClaudeModels([]));
-    apiFetch('/api/settings/models?sdk=cursor')
-      .then((d) => setCursorModels(d.models || []))
-      .catch(() => setCursorModels([]));
-  }, []);
-
-  const handleRefreshClaudeModels = async () => {
-    setRefreshingClaudeModels(true);
-    try {
-      const d = await apiFetch('/api/settings/models/refresh', { method: 'POST' });
-      setClaudeModels(d.models || []);
-    } catch (err) {
-      toastError('Failed to refresh Claude models', err);
-    } finally {
-      setRefreshingClaudeModels(false);
-    }
-  };
-
-  const handleRefreshCursorModels = async () => {
-    setRefreshingCursorModels(true);
-    try {
-      const d = await apiFetch('/api/settings/models?sdk=cursor');
-      setCursorModels(d.models || []);
-    } catch (err) {
-      toastError('Failed to refresh Cursor models', err);
-    } finally {
-      setRefreshingCursorModels(false);
-    }
-  };
-
-  useEffect(() => {
     if (!settings) return;
-    setModel(settings.model || '');
-    const rawCursorModel = settings.cursor_model || '';
-    try {
-      const parsed = JSON.parse(rawCursorModel);
-      if (parsed?.id) {
-        setCursorModel(parsed.id);
-        savedCursorParamsRef.current = parsed.params ?? null;
-      } else {
-        setCursorModel(rawCursorModel);
-        savedCursorParamsRef.current = null;
-      }
-    } catch {
-      setCursorModel(rawCursorModel);
-      savedCursorParamsRef.current = null;
-    }
     setDefaultAgentSdk(settings.default_agent_sdk || 'claude');
     setBranchPrefix(settings.branch_prefix ?? 'baguette/');
     setAllowedCommands(settings.allowed_commands || []);
@@ -887,24 +829,6 @@ function AgentTab({ settings, onSave }) {
     setCursorApiKeyDirty(false);
   }, [settings]);
 
-  useEffect(() => {
-    const m = cursorModels.find((m) => m.id === cursorModel);
-    const variants = m?.variants ?? [];
-    if (!variants.length) { setCursorVariantIdx(null); return; }
-    if (savedCursorParamsRef.current) {
-      const saved = savedCursorParamsRef.current;
-      const matchIdx = variants.findIndex(
-        (v) =>
-          v.params?.length === saved.length &&
-          v.params.every((p, i) => p.id === saved[i]?.id && p.value === saved[i]?.value)
-      );
-      savedCursorParamsRef.current = null;
-      if (matchIdx >= 0) { setCursorVariantIdx(matchIdx); return; }
-    }
-    const defaultIdx = variants.findIndex((v) => v.is_default);
-    setCursorVariantIdx(defaultIdx >= 0 ? defaultIdx : 0);
-  }, [cursorModel, cursorModels]);
-
   const systemAllowedCommands = settings?.system_allowed_commands || [];
 
   const handleSave = async (e) => {
@@ -913,18 +837,7 @@ function AgentTab({ settings, onSave }) {
     setSaved(false);
     setError(null);
     try {
-      const selectedCursorVariant = (() => {
-        if (!cursorModel || cursorVariantIdx == null) return null;
-        const m = cursorModels.find((m) => m.id === cursorModel);
-        const variants = m?.variants ?? [];
-        return variants[cursorVariantIdx] ?? null;
-      })();
       const patch = {
-        model,
-        cursor_model:
-          cursorModel && selectedCursorVariant?.params?.length
-            ? JSON.stringify({ id: cursorModel, params: selectedCursorVariant.params })
-            : cursorModel,
         default_agent_sdk: defaultAgentSdk,
         branch_prefix: branchPrefix,
         allowed_commands: allowedCommands,
@@ -1065,32 +978,6 @@ function AgentTab({ settings, onSave }) {
       <div className="space-y-4 max-w-xl">
         <h2 className="text-sm font-semibold text-zinc-300">Claude</h2>
         <div>
-          <div className="flex items-center justify-between mb-1">
-            <label className="text-sm font-medium text-zinc-300">Default model</label>
-            <button
-              type="button"
-              onClick={handleRefreshClaudeModels}
-              disabled={refreshingClaudeModels}
-              className="text-xs text-amber-400 hover:text-amber-300 disabled:opacity-50 transition-colors"
-            >
-              {refreshingClaudeModels ? 'Refreshing…' : '↻ Refresh'}
-            </button>
-          </div>
-          <select
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
-          >
-            {claudeModels.length === 0 && <option value={model || ''}>{model || 'Loading…'}</option>}
-            {model && !claudeModels.some((m) => m.id === model) && <option value={model}>{model}</option>}
-            {claudeModels.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.display_name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
           <label className="block text-sm font-medium text-zinc-300 mb-1">API Key</label>
           <MaskedSecretInput
             maskedValue={settings?.anthropic_api_key}
@@ -1109,60 +996,6 @@ function AgentTab({ settings, onSave }) {
       {/* Cursor */}
       <div className="space-y-4 max-w-xl">
         <h2 className="text-sm font-semibold text-zinc-300">Cursor</h2>
-        <div>
-          <div className="flex items-center justify-between mb-1">
-            <label className="text-sm font-medium text-zinc-300">Default model</label>
-            <button
-              type="button"
-              onClick={handleRefreshCursorModels}
-              disabled={refreshingCursorModels}
-              className="text-xs text-amber-400 hover:text-amber-300 disabled:opacity-50 transition-colors"
-            >
-              {refreshingCursorModels ? 'Refreshing…' : '↻ Refresh'}
-            </button>
-          </div>
-          <select
-            value={cursorModel}
-            onChange={(e) => {
-              savedCursorParamsRef.current = null;
-              setCursorModel(e.target.value);
-            }}
-            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
-          >
-            <option value="">System default</option>
-            {cursorModels.length === 0 && cursorModel && (
-              <option value={cursorModel}>{cursorModel}</option>
-            )}
-            {cursorModels.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.display_name}
-              </option>
-            ))}
-          </select>
-        </div>
-        {(() => {
-          const m = cursorModels.find((m) => m.id === cursorModel);
-          const variants = m?.variants ?? [];
-          return variants.length > 0 ? (
-            <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-1">
-                Default variant
-              </label>
-              <select
-                value={cursorVariantIdx ?? 0}
-                onChange={(e) => setCursorVariantIdx(parseInt(e.target.value))}
-                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
-              >
-                {variants.map((v, i) => (
-                  <option key={i} value={i}>
-                    {variantLabel(v, m?.display_name)}
-                    {v.is_default ? ' (default)' : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ) : null;
-        })()}
         <div>
           <label className="block text-sm font-medium text-zinc-300 mb-1">API Key</label>
           <MaskedSecretInput

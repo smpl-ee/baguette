@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import GithubIcon from './GithubIcon.jsx';
 import { apiFetch } from '../api.js';
-import { usersService, pluginsService } from '../feathers.js';
-import { useAuth } from '../hooks/useAuth.jsx';
+import { pluginsService, sessionsService } from '../feathers.js';
 import { useRepoContext } from '../context/RepoContext.jsx';
 import { useGetBranches } from '../hooks/useGetBranches.js';
 import { usePersistentState } from '../hooks/usePersistentState.js';
@@ -18,8 +17,30 @@ function parseRepoFullName(full) {
   return { owner: full.slice(0, i), name: full.slice(i + 1) };
 }
 
+// Parse cursor model JSON to get model ID and raw params
+function parseCursorModel(rawModel) {
+  if (!rawModel) return { modelId: '', rawParams: null };
+  try {
+    const j = JSON.parse(rawModel);
+    if (j?.id) return { modelId: j.id, rawParams: j.params ?? null };
+  } catch {}
+  return { modelId: rawModel, rawParams: null };
+}
+
+// "Claude / modelId" or "Cursor / modelId", with params appended only when showParams is true
+function comboLabel(agentSdk, rawModel, showParams = false) {
+  const sdkLabel = agentSdk === 'cursor' ? 'Cursor' : 'Claude';
+  const { modelId, rawParams } =
+    agentSdk === 'cursor' ? parseCursorModel(rawModel) : { modelId: rawModel || '', rawParams: null };
+  if (!modelId) return sdkLabel;
+  const base = `${sdkLabel} / ${modelId}`;
+  if (showParams && rawParams?.length) {
+    return `${base} (${rawParams.map((p) => `${p.id}:${p.value}`).join(', ')})`;
+  }
+  return base;
+}
+
 export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPrompt }) {
-  const { user } = useAuth();
   const persistentState = usePersistentState(`builder-form-${repoFullName}`);
   const globalState = usePersistentState('builder-form-global');
   const [branch, setBranch] = persistentState.useState('branch', '');
@@ -29,16 +50,26 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
   const [branchName, setBranchName] = persistentState.useState('branchName', '');
   const [autoPush, setAutoPush] = persistentState.useState('autoPush', true);
   const { repos } = useRepoContext();
-  const [agentSdk, setAgentSdk] = globalState.useState('agentSdk', 'claude');
-  const [model, setModel] = persistentState.useState('model', '');
-  const [models, setModels] = useState([]);
+  const [agentSdk, setAgentSdkRaw] = persistentState.useState('agentSdk', 'claude');
+  const [model, setModel] = useState('');
   const [cursorVariantIdx, setCursorVariantIdx] = useState(null);
+  const [models, setModels] = useState([]);
+  const [refreshingModels, setRefreshingModels] = useState(false);
   const [selectedPlugins, setSelectedPlugins] = persistentState.useState('plugins', []);
   const [availablePlugins, setAvailablePlugins] = useState([]);
   const [files, setFiles] = useState([]);
   const [fileError, setFileError] = useState(null);
+  const [recentCombos, setRecentCombos] = useState([]);
   const initialPromptRef = useRef(null);
+  const comboAutoApplied = useRef(false);
   const isCursor = agentSdk === 'cursor';
+
+  // Cascade-clear harness change: reset model + variant
+  const setAgentSdk = (sdk) => {
+    setAgentSdkRaw(sdk);
+    setModel('');
+    setCursorVariantIdx(null);
+  };
 
   const selectedRepo = useMemo(
     () => repos.find((r) => r.full_name === repoFullName),
@@ -64,59 +95,69 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repoFullName, selectedRepo?.default_branch, branches]);
 
-  const cursorDefaultModelRef = useRef('');
-  const claudeDefaultModelRef = useRef('');
-  const modelExplicitlySet = useRef(false);
+  const loadModels = (force = false) => {
+    const base =
+      agentSdk === 'cursor' ? '/api/settings/models?sdk=cursor' : '/api/settings/models';
+    const url = force && agentSdk !== 'cursor' ? '/api/settings/models/refresh' : base;
+    const method = force && agentSdk !== 'cursor' ? 'POST' : 'GET';
+    setRefreshingModels(true);
+    return apiFetch(url, method === 'POST' ? { method } : undefined)
+      .then((d) => setModels(d.models || []))
+      .catch(() => {})
+      .finally(() => setRefreshingModels(false));
+  };
 
+  // Load models for current harness whenever agentSdk changes
   useEffect(() => {
-    if (!user?.id) return;
-    usersService
-      .get(user.id)
-      .then((d) => {
-        if (d?.default_agent_sdk) {
-          setAgentSdk((prev) => (prev === 'claude' ? d.default_agent_sdk : prev));
-        }
-        if (d?.model) {
-          claudeDefaultModelRef.current = d.model;
-          if (!modelExplicitlySet.current && !isCursor) setModel(d.model);
-        }
-        if (d?.cursor_model) {
-          cursorDefaultModelRef.current = d.cursor_model;
-          if (!modelExplicitlySet.current && isCursor) setModel(d.cursor_model);
-        }
-      })
-      .catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
-
-  useEffect(() => {
-    const url = isCursor ? '/api/settings/models?sdk=cursor' : '/api/settings/models';
     setModels([]);
-    modelExplicitlySet.current = false;
-    apiFetch(url)
-      .then((d) => {
-        const loadedModels = d.models || [];
-        setModels(loadedModels);
-        setModel((prev) => {
-          if (modelExplicitlySet.current) return prev;
-          if (prev && loadedModels.some((m) => m.id === prev)) return prev;
-          const pref = isCursor ? cursorDefaultModelRef.current : claudeDefaultModelRef.current;
-          if (pref && loadedModels.some((m) => m.id === pref)) return pref;
-          return loadedModels[0]?.id || '';
-        });
-      })
-      .catch(() => {});
+    loadModels();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentSdk]);
 
+  // Set default model only when model is explicitly empty (e.g. after harness cascade-clear)
+  useEffect(() => {
+    setModel((prev) => {
+      if (prev !== '') return prev; // keep whatever is set — combo or user choice
+      return models[0]?.id || '';
+    });
+  }, [agentSdk, models]);
+
+  // Set default cursor variant when model or models change (only if not already set)
   useEffect(() => {
     if (!isCursor) { setCursorVariantIdx(null); return; }
     const m = models.find((m) => m.id === model);
     const variants = m?.variants ?? [];
-    const defaultIdx = variants.findIndex((v) => v.is_default);
-    setCursorVariantIdx(variants.length > 0 ? (defaultIdx >= 0 ? defaultIdx : 0) : null);
+    if (variants.length === 0) { setCursorVariantIdx(null); return; }
+    setCursorVariantIdx((prev) => {
+      if (prev != null && prev < variants.length) return prev;
+      const defaultIdx = variants.findIndex((v) => v.is_default);
+      return defaultIdx >= 0 ? defaultIdx : 0;
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model, models]);
+
+  // Load recent combos for this repo and reset auto-apply flag per repo
+  useEffect(() => {
+    comboAutoApplied.current = false;
+    if (!repoFullName) { setRecentCombos([]); return; }
+    sessionsService
+      .recentCombos({ repoFullName })
+      .then((combos) => setRecentCombos(combos))
+      .catch(() => setRecentCombos([]));
+  }, [repoFullName]);
+
+  // Auto-apply the most recent combo once when combos load for a repo
+  useEffect(() => {
+    if (!recentCombos.length || comboAutoApplied.current) return;
+    comboAutoApplied.current = true;
+    const combo = recentCombos[0];
+    const modelId =
+      combo.agentSdk === 'cursor' ? parseCursorModel(combo.model).modelId : combo.model;
+    setAgentSdkRaw(combo.agentSdk);
+    setModel(modelId);
+    setCursorVariantIdx(null); // resolved by variant default effect once models load
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recentCombos]);
 
   useEffect(() => {
     pluginsService
@@ -198,22 +239,35 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
     setFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
+  // Quick-combo dropdown — normalize cursor model IDs before comparing
+  const comboMatchIdx = recentCombos.findIndex((c) => {
+    if (c.agentSdk !== agentSdk) return false;
+    const modelId = c.agentSdk === 'cursor' ? parseCursorModel(c.model).modelId : c.model;
+    return modelId === model;
+  });
+
+  const handleComboChange = (e) => {
+    const val = e.target.value;
+    if (val === '__custom__') {
+      setShowMore(true);
+      return;
+    }
+    const idx = parseInt(val, 10);
+    if (isNaN(idx)) return;
+    const combo = recentCombos[idx];
+    if (!combo) return;
+    const modelId = combo.agentSdk === 'cursor' ? parseCursorModel(combo.model).modelId : combo.model;
+    setAgentSdkRaw(combo.agentSdk);
+    setModel(modelId);
+    setCursorVariantIdx(null); // resolved by variant default effect once models load
+  };
+
+  const comboSelectValue = comboMatchIdx >= 0 ? String(comboMatchIdx) : '';
+
   const { owner: repoOwner, name: repoName } = parseRepoFullName(repoFullName);
 
   return (
     <form onSubmit={handleStart} className="space-y-4">
-      <div className="flex items-center gap-1 p-0.5 bg-zinc-800 rounded-md w-fit">
-        {['claude', 'cursor'].map((sdk) => (
-          <button
-            key={sdk}
-            type="button"
-            onClick={() => setAgentSdk(sdk)}
-            className={`px-3 py-1 rounded text-xs font-medium transition-colors capitalize ${agentSdk === sdk ? 'bg-amber-500 text-zinc-950' : 'text-zinc-400 hover:text-zinc-200'}`}
-          >
-            {sdk}
-          </button>
-        ))}
-      </div>
       <div className="space-y-2">
         <div>
           <label className="mb-1 block text-sm font-medium text-zinc-300">Base branch</label>
@@ -312,10 +366,31 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
               </div>
             )}
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-1">Model</label>
+              <label className="block text-sm font-medium text-zinc-300 mb-1">Harness</label>
+              <select
+                value={agentSdk}
+                onChange={(e) => setAgentSdk(e.target.value)}
+                className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+              >
+                <option value="claude">Claude</option>
+                <option value="cursor">Cursor</option>
+              </select>
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-sm font-medium text-zinc-300">Model</label>
+                <button
+                  type="button"
+                  onClick={() => loadModels(true)}
+                  disabled={refreshingModels}
+                  className="text-xs text-amber-400 hover:text-amber-300 disabled:opacity-50 transition-colors"
+                >
+                  {refreshingModels ? 'Refreshing…' : '↻ Refresh'}
+                </button>
+              </div>
               <select
                 value={model}
-                onChange={(e) => { setModel(e.target.value); modelExplicitlySet.current = true; }}
+                onChange={(e) => { setModel(e.target.value); setCursorVariantIdx(null); }}
                 className="w-full bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
               >
                 {models.length === 0 && <option value="">Loading…</option>}
@@ -423,6 +498,36 @@ export default function BuilderForm({ onSubmit, loading, repoFullName, defaultPr
         </button>
       </div>
       <div className="flex flex-wrap items-center gap-3">
+        {recentCombos.length > 0 && (() => {
+          // Compute base labels for duplicate detection
+          const baseLabels = recentCombos.map((c) => comboLabel(c.agentSdk, c.model, false));
+          const baseLabelCount = {};
+          baseLabels.forEach((l) => { baseLabelCount[l] = (baseLabelCount[l] || 0) + 1; });
+
+          return (
+            <select
+              value={comboSelectValue}
+              onChange={handleComboChange}
+              disabled={!repoFullName}
+              className="bg-zinc-800 border border-zinc-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50 disabled:opacity-40 min-w-0 max-w-xs truncate"
+            >
+              {comboSelectValue === '' && (
+                <option value="" disabled>
+                  {comboLabel(agentSdk, model, false)}
+                </option>
+              )}
+              {recentCombos.map((combo, i) => {
+                const showParams = baseLabelCount[baseLabels[i]] > 1;
+                return (
+                  <option key={i} value={String(i)}>
+                    {comboLabel(combo.agentSdk, combo.model, showParams)}
+                  </option>
+                );
+              })}
+              <option value="__custom__">Select something else…</option>
+            </select>
+          );
+        })()}
         <div className="flex items-center gap-3">
           <button
             type="submit"
